@@ -75,6 +75,8 @@ class AsyncClient(_BaseClient):
         conn_config: Optional[ConnectionConfig] = None,
     ) -> None:
         self._logger = get_logger("shunyalabs.rt.async_client")
+        self._logger.info("AsyncClient.__init__ called (api_key=%s, url=%s)", 
+                         "***" if api_key else None, url)
 
         (
             self._session,
@@ -113,6 +115,8 @@ class AsyncClient(_BaseClient):
         deliver_deltas_only: bool = True,
         use_api_gateway_format: bool = False,
     ) -> None:
+        self._logger.info("AsyncClient.start_session called (session_id=%s, model=%s, use_api_gateway_format=%s)",
+                         session_id, model, use_api_gateway_format)
         """
         This method establishes a WebSocket connection, and configures the transcription session.
 
@@ -143,20 +147,27 @@ class AsyncClient(_BaseClient):
                 ...     await client.start_session()
                 ...     await client.send_audio(frame)
         """
-        await self._start_recognition_session(
-            transcription_config=transcription_config,
-            audio_format=audio_format,
-            translation_config=translation_config,
-            audio_events_config=audio_events_config,
-            ws_headers=ws_headers,
-            session_id=session_id,
-            api_key=api_key,
-            model=model,
-            deliver_deltas_only=deliver_deltas_only,
-            use_api_gateway_format=use_api_gateway_format,
-        )
+        try:
+            await self._start_recognition_session(
+                transcription_config=transcription_config,
+                audio_format=audio_format,
+                translation_config=translation_config,
+                audio_events_config=audio_events_config,
+                ws_headers=ws_headers,
+                session_id=session_id,
+                api_key=api_key,
+                model=model,
+                deliver_deltas_only=deliver_deltas_only,
+                use_api_gateway_format=use_api_gateway_format,
+            )
+            self._logger.info("AsyncClient.start_session completed successfully")
+        except Exception as e:
+            self._logger.error("AsyncClient.start_session failed: %s", e)
+            raise
 
     async def stop_session(self) -> None:
+        self._logger.info("AsyncClient.stop_session called (seq_no=%s, session_id=%s)", 
+                         self._seq_no, self._session_id)
         """
         This method closes the WebSocket connection and ends the transcription session.
 
@@ -172,11 +183,19 @@ class AsyncClient(_BaseClient):
                 ...     await client.send_audio(frame)
                 ...     await client.stop_session()
         """
-        await self._send_eos(self._seq_no, session_id=self._session_id)
-        await self._session_done_evt.wait()  # Wait for end of transcript event to indicate we can stop listening
-        await self.close()
+        try:
+            await self._send_eos(self._seq_no, session_id=self._session_id)
+            self._logger.info("AsyncClient.stop_session: EOS sent, waiting for session_done_evt")
+            await self._session_done_evt.wait()  # Wait for end of transcript event to indicate we can stop listening
+            self._logger.info("AsyncClient.stop_session: session_done_evt set, closing connection")
+            await self.close()
+            self._logger.info("AsyncClient.stop_session completed")
+        except Exception as e:
+            self._logger.error("AsyncClient.stop_session failed: %s", e)
+            raise
 
     async def force_end_of_utterance(self) -> None:
+        self._logger.info("AsyncClient.force_end_of_utterance called")
         """
     This method sends a ForceEndOfUtterance message to the server to signal
         the end of an utterance. Forcing end of utterance will cause the final
@@ -195,6 +214,7 @@ class AsyncClient(_BaseClient):
                 ...     await client.force_end_of_utterance()
         """
         await self.send_message({"message": ClientMessageType.FORCE_END_OF_UTTERANCE})
+        self._logger.info("AsyncClient.force_end_of_utterance completed")
 
     async def transcribe(
         self,
@@ -212,6 +232,8 @@ class AsyncClient(_BaseClient):
         deliver_deltas_only: bool = True,
         use_api_gateway_format: bool = False,
     ) -> None:
+        self._logger.info("AsyncClient.transcribe called (timeout=%s, session_id=%s, use_api_gateway_format=%s)",
+                         timeout, session_id, use_api_gateway_format)
         """
         Transcribe a single audio stream in real-time.
 
@@ -283,8 +305,13 @@ class AsyncClient(_BaseClient):
                 self._audio_producer(source, audio_format.chunk_size),
                 timeout=timeout,
             )
+            self._logger.info("AsyncClient.transcribe completed successfully")
         except asyncio.TimeoutError as exc:
+            self._logger.error("AsyncClient.transcribe timed out")
             raise TimeoutError("Transcription session timed out") from exc
+        except Exception as e:
+            self._logger.error("AsyncClient.transcribe failed: %s", e)
+            raise
 
     async def _audio_producer(self, source: BinaryIO, chunk_size: int) -> None:
         """
@@ -297,27 +324,52 @@ class AsyncClient(_BaseClient):
             source: File-like object to read audio from
             chunk_size: Chunk size for audio data
         """
+        self._logger.info("AsyncClient._audio_producer called (chunk_size=%s)", chunk_size)
         src = FileSource(source, chunk_size=chunk_size)
+        chunk_count = 0
 
         try:
             async for frame in src:
                 if self._session_done_evt.is_set():
+                    self._logger.info("AsyncClient._audio_producer: session_done_evt set, breaking")
                     break
 
                 try:
                     # Pass session_id and sample_rate for API Gateway format
+                    chunk_size = len(frame)
+                    audio_duration_ms = (chunk_size / 4 / self._sample_rate * 1000) if chunk_size > 0 else 0
+                    
+                    self._logger.debug(
+                        "AsyncClient._audio_producer: sending chunk %d, size=%d bytes, duration=%.2f ms, sample_rate=%d Hz",
+                        chunk_count + 1, chunk_size, audio_duration_ms, self._sample_rate
+                    )
+                    
                     await self.send_audio(
                         frame,
                         session_id=self._session_id,
                         sample_rate=self._sample_rate
                     )
+                    chunk_count += 1
+                    
+                    if chunk_count % 10 == 0:
+                        total_audio_ms = (chunk_count * chunk_size / 4 / self._sample_rate * 1000) if chunk_size > 0 else 0
+                        self._logger.info(
+                            "AsyncClient._audio_producer: sent %d chunks (total audio: %.2f seconds, avg chunk: %.2f ms)",
+                            chunk_count, total_audio_ms / 1000, audio_duration_ms
+                        )
                 except Exception as e:
-                    self._logger.error("Failed to send audio frame: %s", e)
+                    self._logger.error(
+                        "Failed to send audio frame (chunk %d, size=%d bytes): %s",
+                        chunk_count + 1, len(frame) if frame else 0, e
+                    )
                     self._session_done_evt.set()
                     break
 
+            self._logger.info("AsyncClient._audio_producer: finished reading source, sent %s total chunks, calling stop_session", chunk_count)
             await self.stop_session()
+            self._logger.info("AsyncClient._audio_producer completed")
         except asyncio.CancelledError:
+            self._logger.info("AsyncClient._audio_producer cancelled")
             raise
         except Exception as e:
             self._logger.error("Audio producer error: %s", e)
@@ -325,68 +377,80 @@ class AsyncClient(_BaseClient):
 
     async def _send_eos(self, seq_no: int, session_id: Optional[str] = None) -> None:
         """Send EndOfStream message to server."""
+        self._logger.info("AsyncClient._send_eos called (seq_no=%s, session_id=%s, eos_sent=%s, session_done=%s)",
+                         seq_no, session_id, self._eos_sent, self._session_done_evt.is_set())
         if not self._eos_sent and not self._session_done_evt.is_set():
             try:
                 if self._use_api_gateway_format:
-                    # API Gateway format: send END_OF_AUDIO frame first
-                    import base64
-                    eos_b64 = base64.b64encode(b"END_OF_AUDIO").decode("ascii")
-                    eos_frame = {
-                        "action": "send",
-                        "type": "frame",
-                        "session_id": session_id or self._session_id or (self._session.request_id if hasattr(self._session, 'request_id') else 'default'),
-                        "connection_id": None,
-                        "frame_seq": seq_no + 1,
-                        "audio_inline_b64": eos_b64,
-                        "dtype": "float32",
-                        "channels": 1,
-                        "sr": self._sample_rate,
-                    }
-                    await self.send_message(eos_frame)
+                    self._logger.info("AsyncClient._send_eos: sending API Gateway format EOS")
+                    # API Gateway format - match test_apigw_ws_send_passthrough.py
+                    # Just send END message (no END_OF_AUDIO frame needed)
+                    effective_session_id = session_id or self._session_id or (self._session.request_id if hasattr(self._session, 'request_id') else 'default')
                     
-                    # Then send end route
                     end_msg = {
-                        "action": "end",
                         "type": "end",
-                        "session_id": session_id or self._session_id or (self._session.request_id if hasattr(self._session, 'request_id') else 'default'),
+                        "session_id": effective_session_id,
+                        "connection_id": effective_session_id,  # Use session_id as connection_id
                     }
                     await self.send_message(end_msg)
+                    self._logger.info("AsyncClient._send_eos: sent END message")
                 else:
+                    self._logger.info("AsyncClient._send_eos: sending standard format EOS")
                     # Standard format
                     await self.send_message({"message": ClientMessageType.END_OF_STREAM, "last_seq_no": seq_no})
                 self._eos_sent = True
+                self._logger.info("AsyncClient._send_eos completed (eos_sent=True)")
             except Exception as e:
                 self._logger.error("Failed to send EndOfStream message: %s", e)
+                raise
+        else:
+            self._logger.info("AsyncClient._send_eos: skipping (eos_sent=%s, session_done=%s)", 
+                             self._eos_sent, self._session_done_evt.is_set())
 
     async def _wait_recognition_started(self, timeout: float = 5.0) -> None:
         """Wait for RecognitionStarted message from server."""
-        await asyncio.wait_for(self._recognition_started_evt.wait(), timeout)
+        self._logger.info("AsyncClient._wait_recognition_started called (timeout=%s)", timeout)
+        try:
+            await asyncio.wait_for(self._recognition_started_evt.wait(), timeout)
+            self._logger.info("AsyncClient._wait_recognition_started: recognition started event received")
+        except asyncio.TimeoutError:
+            self._logger.error("AsyncClient._wait_recognition_started: timeout waiting for recognition")
+            raise
 
     def _on_recognition_started(self, msg: dict[str, Any]) -> None:
         """Handle RecognitionStarted message from server (or SERVER_READY for API Gateway)."""
+        self._logger.info("AsyncClient._on_recognition_started called (msg=%s)", msg)
         # Handle both standard format and API Gateway format (converted in _recv_loop)
         self._session.session_id = msg.get("id") or msg.get("session_id") or getattr(self._session, 'request_id', None)
         self._recognition_started_evt.set()
-        self._logger.debug("Recognition started (session_id=%s)", self._session.session_id)
+        self._logger.info("Recognition started (session_id=%s)", self._session.session_id)
 
     def _on_eot(self, msg: dict[str, Any]) -> None:
         """Handle EndOfTranscript message from server."""
-        self._logger.debug("Received EndOfTranscript message")
+        self._logger.info("AsyncClient._on_eot called (msg=%s)", msg)
         self._session_done_evt.set()
+        self._logger.info("AsyncClient._on_eot: session_done_evt set")
 
     def _on_error(self, msg: dict[str, Any]) -> None:
         """Handle Error message from server."""
+        self._logger.info("AsyncClient._on_error called (msg=%s)", msg)
         error = msg.get("reason", "unknown")
         self._logger.error("Server error: %s", error)
         self._session_done_evt.set()
+        self._logger.info("AsyncClient._on_error: session_done_evt set, raising TranscriptionError")
         raise TranscriptionError(error)
 
     def _on_audio_added(self, msg: dict[str, Any]) -> None:
         """Handle AudioAdded message from server."""
+        self._logger.debug("AsyncClient._on_audio_added called (msg=%s)", msg)
+        old_seq_no = self._seq_no
         self._seq_no = msg.get("seq_no", 0)
+        if old_seq_no != self._seq_no:
+            self._logger.debug("AsyncClient._on_audio_added: seq_no updated from %s to %s", old_seq_no, self._seq_no)
 
     def _on_warning(self, msg: dict[str, Any]) -> None:
         """Handle Warning message from server."""
+        self._logger.info("AsyncClient._on_warning called (msg=%s)", msg)
         self._logger.warning("Server warning: %s", msg.get("reason", "unknown"))
 
     async def close(self) -> None:
@@ -398,5 +462,29 @@ class AsyncClient(_BaseClient):
         Ensures the session is marked as complete and delegates to the base
         class for full cleanup including WebSocket connection termination.
         """
+        import traceback
+        # Get the caller information for debugging
+        stack = traceback.extract_stack()
+        caller = stack[-2] if len(stack) >= 2 else None
+        caller_info = f"{caller.filename}:{caller.lineno}" if caller else "unknown"
+        self._logger.info("🟡 ASYNC_CLIENT: AsyncClient.close() called (from: %s)", caller_info)
+        # Print final transcription before closing (fallback if DISCONNECT/EndOfTranscript weren't received)
+        self._logger.info("Connection closing, printing final transcription if available...")
+        self._print_final_transcription()
         self._session_done_evt.set()
-        await super().close()
+        self._logger.debug("Session done event set")
+        # Cancel receive task and close transport
+        if self._recv_task and not self._recv_task.done():
+            self._logger.debug("Cancelling receive task...")
+            self._recv_task.cancel()
+            try:
+                await self._recv_task
+                self._logger.debug("Receive task cancelled successfully")
+            except asyncio.CancelledError:
+                self._logger.debug("Receive task cancellation confirmed")
+        else:
+            self._logger.debug("Receive task already done or doesn't exist")
+        self._logger.debug("Closing transport...")
+        await self._transport.close()
+        self._closed_evt.set()
+        self._logger.info("🟡 ASYNC_CLIENT: AsyncClient.close() completed (closed_evt set)")

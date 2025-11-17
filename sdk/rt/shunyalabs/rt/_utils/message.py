@@ -43,26 +43,33 @@ def build_start_recognition_message(
         if language == "auto" or not language:
             language = None
         
-        # Build config dict matching API Gateway expected format
+        # Build config dict matching API Gateway expected format (from test_apigw_ws_send_passthrough.py)
+        effective_session_id = session_id or "default-session"
         config = {
-            "uid": session_id or "default-session",
+            "uid": effective_session_id,
             "language": language,
             "task": "transcribe",
             "model": model,
-            "client_sample_rate": audio_format.sample_rate,
+            "client_sample_rate": int(audio_format.sample_rate),
             "deliver_deltas_only": deliver_deltas_only,
+            "inactivity_timeout": 3600.0,  # 1 hour (3600 seconds) for direct connections
+            "use_vad": True,  # Voice Activity Detection
         }
         
         if api_key:
             config["api_key"] = api_key
         
-        # API Gateway format
+        # API Gateway format - match test_apigw_ws_send_passthrough.py format
         init_msg = {
-            "action": "send",
             "type": "init",
-            "session_id": session_id or "default-session",
+            "session_id": effective_session_id,
+            "connection_id": effective_session_id,  # Use session_id as connection_id
             "config": config,
         }
+        
+        # Also include api_key at top level for compatibility (matching working test)
+        if api_key:
+            init_msg["api_key"] = api_key
         
         return init_msg
     

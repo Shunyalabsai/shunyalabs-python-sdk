@@ -1,4 +1,4 @@
-__version__ = "0.0.0"
+__version__ = "0.1.0"
 
 from ._async_client import AsyncClient
 from ._async_multi_channel_client import AsyncMultiChannelClient
@@ -29,6 +29,7 @@ from ._models import SpeakerIdentifier
 from ._models import TranscriptionConfig
 from ._models import TranscriptResult
 from ._models import TranslationConfig
+from ._utils.audio import convert_to_pcm_f32le
 from ._utils.microphone import Microphone
 
 __all__ = [
@@ -50,6 +51,7 @@ __all__ = [
     "JWTAuth",
     "Microphone",
     "OperatingPoint",
+    "convert_to_pcm_f32le",
     "ServerMessageType",
     "SessionError",
     "SessionInfo",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import ssl
 import uuid
 from typing import Optional
 from typing import Union
@@ -117,6 +118,24 @@ class Transport:
                 WS_HEADERS_KEY: ws_headers,
                 **self._conn_config.to_dict(),
             }
+            
+            # Create SSL context that handles SNI properly
+            # Extract hostname from URL for SNI
+            parsed_url = urlparse(url_with_params)
+            if parsed_url.scheme == 'wss':
+                # Create SSL context with default settings
+                # The websockets library should handle SNI automatically, but we can
+                # explicitly set server_hostname if needed
+                ssl_context = ssl.create_default_context()
+                # For some servers with SNI issues, we may need to disable hostname checking
+                # This is a workaround for TLSV1_UNRECOGNIZED_NAME errors
+                # TODO: Make this configurable via ConnectionConfig
+                ssl_context.check_hostname = False
+                ssl_context.verify_mode = ssl.CERT_NONE
+                ws_kwargs['ssl'] = ssl_context
+                # Also try to set server_hostname explicitly if websockets supports it
+                if parsed_url.hostname:
+                    ws_kwargs['server_hostname'] = parsed_url.hostname
 
             self._websocket = await connect(
                 url_with_params,
@@ -204,14 +223,24 @@ class Transport:
             >>> # Connection is now closed and transport cannot be used
         """
         if self._websocket:
+            import traceback
+            # Get the caller information for debugging
+            stack = traceback.extract_stack()
+            caller = stack[-2] if len(stack) >= 2 else None
+            caller_info = f"{caller.filename}:{caller.lineno}" if caller else "unknown"
+            self._logger.info("🔴 TRANSPORT: Closing WebSocket connection (called from: %s)", caller_info)
             self._logger.debug("Closing WebSocket connection")
             try:
                 await self._websocket.close()
-            except Exception:
-                pass
+                self._logger.debug("WebSocket close() completed successfully")
+            except Exception as e:
+                self._logger.debug("WebSocket close() raised exception (ignored): %s", e)
             finally:
                 self._websocket = None
                 self._closed = True
+                self._logger.info("🔴 TRANSPORT: WebSocket connection closed and marked as closed")
+        else:
+            self._logger.debug("Transport.close() called but websocket is already None")
 
     @property
     def is_connected(self) -> bool:

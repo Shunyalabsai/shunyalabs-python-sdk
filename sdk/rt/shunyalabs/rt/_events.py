@@ -80,7 +80,7 @@ class EventEmitter:
         self._handlers.get(event, set()).discard(callback)
         self._once_handlers.get(event, set()).discard(callback)
 
-    def emit(self, event: ServerMessageType, message: dict[str, Any]) -> None:
+    def emit(self, event: ServerMessageType | str, message: dict[str, Any]) -> None:
         """
         Emit event to all registered handlers.
 
@@ -88,6 +88,22 @@ class EventEmitter:
             event: The event type
             message: The message data
         """
+        # Log control message forwarding (for debugging)
+        # Note: event can be either ServerMessageType enum or string (for DISCONNECT)
+        control_events = [
+            ServerMessageType.RECOGNITION_STARTED,
+            ServerMessageType.END_OF_TRANSCRIPT,
+            ServerMessageType.END_OF_UTTERANCE,
+            ServerMessageType.AUDIO_ADDED,
+            ServerMessageType.ERROR,
+            ServerMessageType.WARNING,
+            ServerMessageType.INFO,
+        ]
+        if event in control_events or (isinstance(event, str) and event == "DISCONNECT"):
+            total_handlers = len(self._handlers.get(event, set())) + len(self._once_handlers.get(event, set()))
+            if total_handlers > 0:
+                self._logger.debug("📤 EventEmitter: Calling %d handler(s) for %s", total_handlers, event)
+        
         # Call persistent handlers
         for callback in self._handlers.get(event, set()).copy():
             try:
