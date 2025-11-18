@@ -38,16 +38,20 @@ def build_start_recognition_message(
     
     # API Gateway format
     if use_api_gateway_format:
-        # Map language - handle "auto" or None
-        language = transcription_config.language
+        # Extract language from transcription config - ensure it's passed to ASR
+        language = transcription_config.language if transcription_config else None
+        # Handle "auto" or None - convert to None for auto-detect, otherwise use the language code
         if language == "auto" or not language:
             language = None
+        else:
+            # Ensure language is a string (in case it's passed as Language enum or other type)
+            language = str(language) if language else None
         
         # Build config dict matching API Gateway expected format (from test_apigw_ws_send_passthrough.py)
         effective_session_id = session_id or "default-session"
         config = {
             "uid": effective_session_id,
-            "language": language,
+            "language": language,  # Language code passed to Shunyalabs ASR
             "task": "transcribe",
             "model": model,
             "client_sample_rate": int(audio_format.sample_rate),

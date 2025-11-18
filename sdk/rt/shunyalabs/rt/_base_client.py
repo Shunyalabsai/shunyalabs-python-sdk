@@ -571,6 +571,11 @@ class _BaseClient(EventEmitter):
             deliver_deltas_only=deliver_deltas_only,
             use_api_gateway_format=use_api_gateway_format,
         )
+        
+        # Log language being sent to ASR (for API Gateway format)
+        if use_api_gateway_format and "config" in start_recognition_message:
+            language = start_recognition_message["config"].get("language")
+            self._logger.info("🌐 Language code being sent to Shunyalabs ASR: %s", language or "None (auto-detect)")
 
         await self._ws_connect(ws_headers)
         await self.send_message(start_recognition_message)
