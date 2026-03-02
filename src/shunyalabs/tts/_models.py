@@ -1,0 +1,304 @@
+"""Pydantic models for the Shunyalabs TTS module.
+
+Mirrors the TTS Gateway API schemas (TTSRequestSchema, TTSResponseSchema,
+TTSChunkSchema, TTSCompletionSchema) with SDK-friendly naming and
+convenience methods.
+"""
+
+from __future__ import annotations
+
+import base64
+from enum import Enum
+from pathlib import Path
+from typing import List, Literal, Optional
+
+from pydantic import BaseModel, Field
+
+
+# ---------------------------------------------------------------------------
+# Enums
+# ---------------------------------------------------------------------------
+
+class OutputFormat(str, Enum):
+    """Supported audio output formats.
+
+    Values correspond to the ``output_format`` field accepted by the TTS
+    gateway's ``TTSRequestSchema``.
+    """
+
+    PCM = "pcm"
+    WAV = "wav"
+    MP3 = "mp3"
+    OGG_OPUS = "ogg_opus"
+    FLAC = "flac"
+    MULAW = "mulaw"
+    ALAW = "alaw"
+
+
+# ---------------------------------------------------------------------------
+# Request configuration
+# ---------------------------------------------------------------------------
+
+class TTSConfig(BaseModel):
+    """Configuration for a TTS synthesis request.
+
+    All fields are optional.  When passed to a synthesis method the values
+    are merged into the gateway ``TTSRequestSchema`` JSON body alongside
+    the ``api_key`` and ``target_text`` supplied by the caller.
+
+    Attributes:
+        reference_wav: Base64-encoded reference audio for voice cloning.
+        reference_text: Transcript of the reference audio.
+        max_tokens: Maximum tokens for LLM generation (1--8192).
+        language: ISO 639-1/639-2 language code (2--3 chars).
+        output_format: Desired audio output format.
+        speaker_id: Pre-computed speaker voice identifier.
+        speed: Speaking speed multiplier (0.5--2.0).
+        trim_silence: Strip leading/trailing silence from audio.
+        volume_normalization: ``"peak"`` or ``"loudness"``, or *None*.
+        word_timestamps: Request word-level timestamps (batch only).
+        background_audio: Preset name or base64-encoded background audio.
+        background_volume: Background volume relative to speech (0.0--1.0).
+    """
+
+    reference_wav: Optional[str] = Field(
+        None,
+        description="Base64-encoded reference audio for voice cloning.",
+    )
+    reference_text: Optional[str] = Field(
+        "",
+        description="Transcript of the reference audio.",
+    )
+    max_tokens: int = Field(
+        2048,
+        ge=1,
+        le=8192,
+        description="Maximum tokens for LLM generation.",
+    )
+    language: Optional[str] = Field(
+        None,
+        min_length=2,
+        max_length=3,
+        description="ISO 639-1/639-2 language code.",
+    )
+    output_format: Optional[OutputFormat] = Field(
+        OutputFormat.PCM,
+        description="Output audio format.",
+    )
+    speaker_id: Optional[str] = Field(
+        None,
+        description="Pre-computed speaker voice identifier.",
+    )
+    speed: Optional[float] = Field(
+        1.0,
+        ge=0.5,
+        le=2.0,
+        description="Speaking speed multiplier.",
+    )
+    trim_silence: Optional[bool] = Field(
+        False,
+        description="Trim leading/trailing silence.",
+    )
+    volume_normalization: Optional[str] = Field(
+        None,
+        description="Volume normalization mode: 'peak' or 'loudness'.",
+    )
+    word_timestamps: Optional[bool] = Field(
+        False,
+        description="Return word-level timestamps (batch only).",
+    )
+    background_audio: Optional[str] = Field(
+        None,
+        description="Preset name or base64-encoded background audio.",
+    )
+    background_volume: Optional[float] = Field(
+        0.1,
+        ge=0.0,
+        le=1.0,
+        description="Background audio volume relative to speech.",
+    )
+
+    def to_request_payload(
+        self,
+        api_key: str,
+        target_text: str,
+        request_type: Literal["batch", "streaming"] = "batch",
+    ) -> dict:
+        """Build a dict matching the gateway ``TTSRequestSchema``.
+
+        Args:
+            api_key: API key for authentication.
+            target_text: The text to synthesise.
+            request_type: ``"batch"`` or ``"streaming"``.
+
+        Returns:
+            A dict ready to be serialised as the JSON body for
+            ``POST /tts`` or sent over the ``/ws/tts`` WebSocket.
+        """
+        payload: dict = {
+            "api_key": api_key,
+            "target_text": target_text,
+            "request_type": request_type,
+        }
+
+        # Merge every non-None config value.
+        for field_name, field_info in self.model_fields.items():
+            value = getattr(self, field_name)
+            if value is not None:
+                # Serialize enums to their string value.
+                if isinstance(value, Enum):
+                    value = value.value
+                payload[field_name] = value
+
+        return payload
+
+
+# ---------------------------------------------------------------------------
+# Response models
+# ---------------------------------------------------------------------------
+
+class WordTimestamp(BaseModel):
+    """A single word-level timestamp entry.
+
+    Attributes:
+        word: The word text.
+        start: Start time in seconds.
+        end: End time in seconds.
+    """
+
+    word: str
+    start: float
+    end: float
+
+
+class TTSResult(BaseModel):
+    """Result of a batch TTS synthesis (``POST /tts``).
+
+    The ``audio_data`` field contains **decoded** audio bytes (the gateway
+    returns base64-encoded data which is decoded automatically).
+
+    Attributes:
+        request_id: Unique request identifier.
+        audio_data: Raw audio bytes (decoded from base64).
+        sample_rate: Audio sample rate in Hz.
+        duration_seconds: Total audio duration in seconds.
+        format: Audio format string (e.g. ``"pcm"``).
+        word_timestamps: Optional list of word-level timestamps.
+    """
+
+    request_id: str
+    audio_data: bytes
+    sample_rate: int = 16000
+    duration_seconds: float
+    format: str = "pcm"
+    word_timestamps: Optional[List[WordTimestamp]] = None
+
+    model_config = {"arbitrary_types_allowed": True}
+
+    # ------------------------------------------------------------------
+    # Convenience helpers
+    # ------------------------------------------------------------------
+
+    def save(self, path: str) -> None:
+        """Write the audio bytes to a file.
+
+        Args:
+            path: Filesystem path to write to.  Parent directories are
+                created automatically.
+        """
+        dest = Path(path)
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(self.audio_data)
+
+    @classmethod
+    def from_api_response(cls, data: dict) -> "TTSResult":
+        """Construct a ``TTSResult`` from the raw gateway JSON response.
+
+        The gateway's ``audio_data`` field is base64-encoded; this factory
+        decodes it into raw ``bytes``.
+
+        Args:
+            data: Parsed JSON dict from the ``POST /tts`` response.
+
+        Returns:
+            A populated ``TTSResult`` instance.
+        """
+        audio_b64: str = data.get("audio_data", "")
+        audio_bytes = base64.b64decode(audio_b64) if audio_b64 else b""
+
+        timestamps_raw = data.get("word_timestamps")
+        timestamps = (
+            [WordTimestamp(**wt) for wt in timestamps_raw]
+            if timestamps_raw
+            else None
+        )
+
+        return cls(
+            request_id=data["request_id"],
+            audio_data=audio_bytes,
+            sample_rate=data.get("sample_rate", 16000),
+            duration_seconds=data.get("duration_seconds", 0.0),
+            format=data.get("format", "pcm"),
+            word_timestamps=timestamps,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Streaming models
+# ---------------------------------------------------------------------------
+
+class TTSChunk(BaseModel):
+    """Metadata for a single streaming audio chunk.
+
+    Sent by the gateway as a JSON frame **before** the corresponding
+    binary audio frame on the ``/ws/tts`` WebSocket.
+
+    Attributes:
+        type: Always ``"chunk"``.
+        request_id: Unique request identifier.
+        chunk_index: Zero-based index of this chunk.
+        is_final: Whether this is the last audio chunk.
+        format: Audio format string (present on gateway responses).
+        sample_rate: Audio sample rate in Hz (present on gateway responses).
+    """
+
+    type: Literal["chunk"] = "chunk"
+    request_id: str
+    chunk_index: int
+    is_final: bool = False
+    format: Optional[str] = None
+    sample_rate: Optional[int] = None
+
+
+class TTSCompletion(BaseModel):
+    """Completion message received at the end of a streaming session.
+
+    Attributes:
+        type: Always ``"completion"``.
+        request_id: Unique request identifier.
+        status: ``"complete"`` or ``"error"``.
+        total_chunks: Total number of audio chunks delivered.
+        total_duration_seconds: Total audio duration in seconds.
+        error_message: Error detail when ``status`` is ``"error"``.
+        format: Audio format string.
+        sample_rate: Audio sample rate in Hz.
+    """
+
+    type: Literal["completion"] = "completion"
+    request_id: str
+    status: str
+    total_chunks: int
+    total_duration_seconds: float
+    error_message: Optional[str] = None
+    format: Optional[str] = None
+    sample_rate: Optional[int] = None
+
+
+__all__ = [
+    "OutputFormat",
+    "TTSConfig",
+    "WordTimestamp",
+    "TTSResult",
+    "TTSChunk",
+    "TTSCompletion",
+]
