@@ -29,9 +29,15 @@ from typing import Optional
 import httpx
 import websockets
 from livekit import rtc
-from livekit.agents import stt, utils
-from livekit.agents.stt import (
+from livekit.agents import (
     APIConnectOptions,
+    DEFAULT_API_CONNECT_OPTIONS,
+    NOT_GIVEN,
+    NotGivenOr,
+    stt,
+    utils,
+)
+from livekit.agents.stt import (
     RecognizeStream,
     STT,
     STTCapabilities,
@@ -98,24 +104,24 @@ class STT(stt.STT):
     def stream(
         self,
         *,
-        language: stt.NotGivenOr[str] = stt.NOT_GIVEN,
-        conn_options: APIConnectOptions = stt.DEFAULT_API_CONNECT_OPTIONS,
+        language: NotGivenOr[str] = NOT_GIVEN,
+        conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "STTStream":
-        lang = self._language if language is stt.NOT_GIVEN else language
+        lang = self._language if language is NOT_GIVEN else language
         return STTStream(stt=self, conn_options=conn_options, language=lang)
 
     async def _recognize_impl(
         self,
         buffer: utils.AudioBuffer,
         *,
-        language: stt.NotGivenOr[str] = stt.NOT_GIVEN,
+        language: NotGivenOr[str] = NOT_GIVEN,
         conn_options: APIConnectOptions,
     ) -> SpeechEvent:
         """Batch transcription: POST audio to /v1/transcriptions."""
         frames = buffer if isinstance(buffer, list) else [buffer]
         pcm = b"".join(f.data.tobytes() for f in frames)
         sample_rate = frames[0].sample_rate if frames else 16000
-        lang = self._language if language is stt.NOT_GIVEN else language
+        lang = self._language if language is NOT_GIVEN else language
 
         wav_buf = io.BytesIO()
         with wave.open(wav_buf, "wb") as wf:
