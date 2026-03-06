@@ -56,6 +56,7 @@ class WsTransport:
         "_auth",
         "_conn_config",
         "_sdk_component",
+        "_send_auth_headers",
         "_websocket",
         "_closed",
         "_logger",
@@ -67,6 +68,7 @@ class WsTransport:
         auth: StaticKeyAuth,
         conn_config: Optional[WsConnectionConfig] = None,
         sdk_component: str = "sdk",
+        send_auth_headers: bool = True,
     ) -> None:
         if connect is None:
             raise ImportError(
@@ -77,6 +79,7 @@ class WsTransport:
         self._auth = auth
         self._conn_config = conn_config or WsConnectionConfig()
         self._sdk_component = sdk_component
+        self._send_auth_headers = send_auth_headers
         self._websocket: Optional[ClientConnection] = None
         self._closed = False
         self._logger = logger
@@ -92,7 +95,8 @@ class WsTransport:
         headers = {}
         if ws_headers:
             headers.update(ws_headers)
-        headers.update(self._auth.get_auth_headers())
+        if self._send_auth_headers:
+            headers.update(self._auth.get_auth_headers())
 
         try:
             ws_kwargs: dict = {

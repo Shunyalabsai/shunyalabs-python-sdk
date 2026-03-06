@@ -111,12 +111,13 @@ class AsyncStreamingTTS:
             auth=self._auth,
             conn_config=self._ws_config,
             sdk_component="tts",
+            send_auth_headers=False,
         )
 
         try:
             await transport.connect()
 
-            # 1. Send the config frame.
+            # 1. Send the config frame (api_key is in the JSON payload).
             payload = _build_ws_payload(self._auth, text, config)
             logger.debug("WS /ws/tts sending config: %s", list(payload.keys()))
             await transport.send_message(payload)
@@ -225,6 +226,7 @@ class AsyncStreamingTTS:
             auth=self._auth,
             conn_config=self._ws_config,
             sdk_component="tts",
+            send_auth_headers=False,
         )
 
         completion: Optional[TTSCompletion] = None

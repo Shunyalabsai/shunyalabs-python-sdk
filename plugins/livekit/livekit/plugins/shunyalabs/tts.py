@@ -1,7 +1,8 @@
 """Shunyalabs TTS plugin for LiveKit Agents.
 
-Supports both chunked synthesis (single text → audio) and real-time
-streaming synthesis over WebSocket via the Shunyalabs TTS gateway.
+Supports both chunked synthesis (single text -> audio) and real-time
+streaming synthesis over WebSocket via the Shunyalabs TTS gateway,
+using the Shunyalabs Python SDK for transport and protocol handling.
 
 Install::
 
@@ -18,13 +19,11 @@ Usage::
 
 from __future__ import annotations
 
-import asyncio
-import json
+import logging
 import os
 import uuid
 from typing import Optional
 
-import websockets
 from livekit.agents import (
     APIConnectOptions,
     DEFAULT_API_CONNECT_OPTIONS,
@@ -38,13 +37,22 @@ from livekit.agents.tts import (
     TTSCapabilities,
 )
 
+from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._models import WsConnectionConfig
+from shunyalabs.tts._models import TTSConfig
+from shunyalabs.tts._streaming import AsyncStreamingTTS
+
 from ._version import __version__
+
+logger = logging.getLogger(__name__)
 
 _DEFAULT_WS_URL = "wss://tts.shunyalabs.ai/ws/tts"
 
 
 class TTS(tts.TTS):
     """LiveKit Agents TTS plugin backed by the Shunyalabs TTS gateway.
+
+    Uses the Shunyalabs Python SDK for WebSocket streaming transport.
 
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
@@ -54,7 +62,7 @@ class TTS(tts.TTS):
         language: Language code for transliteration (e.g. ``"en"``, ``"hi"``).
         sample_rate: Output sample rate (default 16000).
         output_format: Audio format (``"pcm"``, ``"wav"``, ``"mp3"``).
-        speed: Speaking speed multiplier (0.5–2.0).
+        speed: Speaking speed multiplier (0.5-2.0).
     """
 
     def __init__(
@@ -85,6 +93,7 @@ class TTS(tts.TTS):
         self._language = language
         self._output_format = output_format
         self._speed = speed
+        self._auth = StaticKeyAuth(self._api_key)
 
     @property
     def model(self) -> str:
@@ -97,6 +106,26 @@ class TTS(tts.TTS):
     def _format_text(self, text: str) -> str:
         """Format text with speaker prefix and style tag."""
         return f"{self._speaker}: {self._style} {text}"
+
+    def _make_tts_config(self) -> TTSConfig:
+        """Build a TTSConfig from plugin settings."""
+        return TTSConfig(
+            language=self._language,
+            output_format=self._output_format,
+            speed=self._speed,
+        )
+
+    def _make_streaming_tts(self) -> AsyncStreamingTTS:
+        """Create an AsyncStreamingTTS instance using the SDK."""
+        return AsyncStreamingTTS(
+            auth=self._auth,
+            ws_url=self._ws_url,
+            ws_config=WsConnectionConfig(
+                open_timeout=10,
+                ping_interval=20,
+                ping_timeout=20,
+            ),
+        )
 
     def synthesize(
         self,
@@ -119,7 +148,7 @@ class TTS(tts.TTS):
 
 
 class ChunkedTTSStream(ChunkedStream):
-    """Single text → audio synthesis via WebSocket."""
+    """Single text -> audio synthesis via the Shunyalabs SDK."""
 
     def __init__(
         self,
@@ -143,37 +172,18 @@ class ChunkedTTSStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        async with websockets.connect(
-            self._tts._ws_url,
-            open_timeout=10,
-            ping_interval=20,
-            ping_timeout=20,
-        ) as ws:
-            config = {
-                "api_key": self._tts._api_key,
-                "target_text": formatted,
-                "language": self._tts._language,
-                "output_format": self._tts._output_format,
-                "request_type": "streaming",
-                "speed": self._tts._speed,
-            }
-            await ws.send(json.dumps(config))
+        streaming_tts = self._tts._make_streaming_tts()
+        config = self._tts._make_tts_config()
 
-            async for msg in ws:
-                if isinstance(msg, bytes):
-                    output_emitter.push(msg)
-                else:
-                    data = json.loads(msg)
-                    msg_type = data.get("type", "")
-                    if msg_type in ("completion", "done", "error"):
-                        break
+        async for audio_bytes in streaming_tts.stream(formatted, config=config):
+            output_emitter.push(audio_bytes)
 
 
 class StreamingTTS(SynthesizeStream):
-    """Token-by-token streaming TTS.
+    """Token-by-token streaming TTS using the Shunyalabs SDK.
 
     Collects pushed text tokens, then on flush/end sends the accumulated
-    text to the TTS gateway and streams back audio chunks.
+    text to the TTS gateway via the SDK and streams back audio chunks.
     """
 
     def __init__(
@@ -188,6 +198,7 @@ class StreamingTTS(SynthesizeStream):
     async def _run(self, output_emitter: AudioEmitter) -> None:
         request_id = str(uuid.uuid4())
         segment_idx = 0
+        pending_text = ""
 
         output_emitter.initialize(
             request_id=request_id,
@@ -199,40 +210,25 @@ class StreamingTTS(SynthesizeStream):
 
         async for data in self._input_ch:
             if isinstance(data, str):
-                text = data.strip()
-                if not text:
-                    continue
+                pending_text += data
+                continue
 
-                seg_id = f"{request_id}-{segment_idx}"
-                segment_idx += 1
-                formatted = self._tts._format_text(text)
+            # FlushSentinel — synthesize accumulated text
+            text = pending_text.strip()
+            pending_text = ""
+            if not text:
+                continue
 
-                output_emitter.start_segment(segment_id=seg_id)
+            seg_id = f"{request_id}-{segment_idx}"
+            segment_idx += 1
+            formatted = self._tts._format_text(text)
 
-                async with websockets.connect(
-                    self._tts._ws_url,
-                    open_timeout=10,
-                    ping_interval=20,
-                    ping_timeout=20,
-                ) as ws:
-                    config = {
-                        "api_key": self._tts._api_key,
-                        "target_text": formatted,
-                        "language": self._tts._language,
-                        "output_format": self._tts._output_format,
-                        "request_type": "streaming",
-                        "speed": self._tts._speed,
-                    }
-                    await ws.send(json.dumps(config))
+            output_emitter.start_segment(segment_id=seg_id)
 
-                    async for msg in ws:
-                        if isinstance(msg, bytes):
-                            output_emitter.push(msg)
-                        else:
-                            resp = json.loads(msg)
-                            if resp.get("type") in ("completion", "done", "error"):
-                                break
+            streaming_tts = self._tts._make_streaming_tts()
+            config = self._tts._make_tts_config()
 
-                output_emitter.end_segment()
+            async for audio_bytes in streaming_tts.stream(formatted, config=config):
+                output_emitter.push(audio_bytes)
 
-        output_emitter.end_input()
+            output_emitter.end_segment()

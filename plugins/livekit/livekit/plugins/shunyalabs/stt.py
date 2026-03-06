@@ -1,7 +1,8 @@
 """Shunyalabs STT plugin for LiveKit Agents.
 
 Supports both batch recognition (file/buffer) and real-time streaming
-over WebSocket via the Shunyalabs ASR gateway.
+over WebSocket via the Shunyalabs ASR gateway, using the Shunyalabs
+Python SDK for transport and protocol handling.
 
 Install::
 
@@ -21,13 +22,14 @@ from __future__ import annotations
 
 import asyncio
 import io
-import json
+import logging
 import os
 import wave
 from typing import Optional
 
+logger = logging.getLogger(__name__)
+
 import httpx
-import websockets
 from livekit import rtc
 from livekit.agents import (
     APIConnectOptions,
@@ -46,21 +48,21 @@ from livekit.agents.stt import (
     SpeechEventType,
 )
 
+from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._models import WsConnectionConfig
+from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
+from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
+
 from ._version import __version__
 
 _DEFAULT_API_URL = "https://asr.shunyalabs.ai"
 _DEFAULT_WS_URL = "wss://asr.shunyalabs.ai/ws"
 
-# Gateway message type → LiveKit SpeechEventType
-_MSG_TO_EVENT: dict[str, SpeechEventType] = {
-    "partial": SpeechEventType.INTERIM_TRANSCRIPT,
-    "final_segment": SpeechEventType.FINAL_TRANSCRIPT,
-    "final": SpeechEventType.FINAL_TRANSCRIPT,
-}
-
 
 class STT(stt.STT):
     """LiveKit Agents STT plugin backed by the Shunyalabs ASR gateway.
+
+    Uses the Shunyalabs Python SDK for WebSocket streaming transport.
 
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
@@ -92,6 +94,7 @@ class STT(stt.STT):
         self._language = language
         self._api_url = api_url.rstrip("/")
         self._ws_url = ws_url
+        self._auth = StaticKeyAuth(self._api_key)
 
     @property
     def model(self) -> str:
@@ -108,7 +111,11 @@ class STT(stt.STT):
         conn_options: APIConnectOptions = DEFAULT_API_CONNECT_OPTIONS,
     ) -> "STTStream":
         lang = self._language if language is NOT_GIVEN else language
-        return STTStream(stt=self, conn_options=conn_options, language=lang)
+        return STTStream(
+            stt=self,
+            conn_options=conn_options,
+            language=lang,
+        )
 
     async def _recognize_impl(
         self,
@@ -133,7 +140,7 @@ class STT(stt.STT):
         async with httpx.AsyncClient(timeout=conn_options.timeout) as client:
             resp = await client.post(
                 f"{self._api_url}/v1/transcriptions",
-                headers={"Authorization": f"Bearer {self._api_key}"},
+                headers=self._auth.get_auth_headers(),
                 files={"file": ("audio.wav", wav_buf.getvalue(), "audio/wav")},
                 data={"language": lang},
             )
@@ -155,14 +162,11 @@ class STT(stt.STT):
 
 
 class STTStream(RecognizeStream):
-    """Streaming recognition via Shunyalabs WebSocket ASR gateway.
+    """Streaming recognition via Shunyalabs SDK's AsyncStreamingASR.
 
-    The base class handles audio resampling to 16 kHz before frames
-    reach ``_run()``.  Audio is forwarded as raw int16 PCM bytes.
-    Gateway partials map to ``INTERIM_TRANSCRIPT`` events; each
-    ``final_segment`` (silence-detected boundary) maps to
-    ``FINAL_TRANSCRIPT + END_OF_SPEECH``; the overall ``final``
-    emits a ``RECOGNITION_USAGE`` event.
+    Uses the SDK's WsTransport for WebSocket connection management,
+    authentication, and protocol handling. The SDK's event-based API
+    is mapped to LiveKit's channel-based SpeechEvent model.
     """
 
     def __init__(
@@ -177,84 +181,70 @@ class STTStream(RecognizeStream):
         self._language = language
 
     async def _run(self) -> None:
-        ws_url = self._stt._ws_url
+        streaming = AsyncStreamingASR(
+            auth=self._stt._auth,
+            ws_url=self._stt._ws_url,
+            ws_config=WsConnectionConfig(
+                open_timeout=10,
+                ping_interval=20,
+                ping_timeout=20,
+            ),
+        )
 
-        async with websockets.connect(
-            ws_url,
-            open_timeout=10,
-            ping_interval=20,
-            ping_timeout=20,
-        ) as ws:
-            # Handshake
-            await ws.send(
-                json.dumps(
-                    {
-                        "language": self._language,
-                        "sample_rate": 16000,
-                        "dtype": "int16",
-                        "api_key": self._stt._api_key,
-                    }
-                )
-            )
-            raw_ready = await asyncio.wait_for(ws.recv(), timeout=15.0)
-            ready = json.loads(raw_ready)
-            if ready.get("type") != "ready":
-                raise RuntimeError(f"Expected 'ready', got: {ready}")
+        config = StreamingConfig(
+            language=self._language,
+            sample_rate=16000,
+            dtype="int16",
+        )
 
-            # Run sender and receiver concurrently
-            await asyncio.gather(
-                self._send_loop(ws),
-                self._recv_loop(ws),
-            )
+        conn = await streaming.stream(config=config)
 
-    async def _send_loop(self, ws: websockets.ClientConnection) -> None:
-        """Read from input channel and forward PCM bytes to the gateway."""
-        async for data in self._input_ch:
-            if isinstance(data, rtc.AudioFrame):
-                await ws.send(data.data.tobytes())
-            # FlushSentinel: gateway has its own VAD/silence detection; no action needed
-
-        # Input channel exhausted (end_input() called) — signal end of stream
-        await ws.send("END")
-
-    async def _recv_loop(self, ws: websockets.ClientConnection) -> None:
-        """Read gateway messages and push them as SpeechEvents."""
-        async for raw in ws:
-            msg = json.loads(raw)
-            msg_type = msg.get("type", "")
-            text = msg.get("text", "")
-            lang = msg.get("language") or self._language
-
-            if msg_type == "partial":
-                if text:
+        try:
+            # Register event handlers that push to LiveKit's event channel
+            @conn.on(StreamingMessageType.PARTIAL)
+            def on_partial(msg):
+                if msg.text:
                     self._event_ch.send_nowait(
                         SpeechEvent(
                             type=SpeechEventType.INTERIM_TRANSCRIPT,
-                            alternatives=[SpeechData(language=lang, text=text)],
+                            alternatives=[SpeechData(
+                                language=msg.language or self._language,
+                                text=msg.text,
+                            )],
                         )
                     )
 
-            elif msg_type == "final_segment":
-                if text:
+            @conn.on(StreamingMessageType.FINAL_SEGMENT)
+            def on_final_segment(msg):
+                if msg.text:
                     self._event_ch.send_nowait(
                         SpeechEvent(
                             type=SpeechEventType.FINAL_TRANSCRIPT,
-                            alternatives=[SpeechData(language=lang, text=text, confidence=1.0)],
+                            alternatives=[SpeechData(
+                                language=msg.language or self._language,
+                                text=msg.text,
+                                confidence=1.0,
+                            )],
                         )
                     )
                     self._event_ch.send_nowait(
                         SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
                     )
 
-            elif msg_type == "final":
-                if text:
+            @conn.on(StreamingMessageType.FINAL)
+            def on_final(msg):
+                if msg.text:
                     self._event_ch.send_nowait(
                         SpeechEvent(
                             type=SpeechEventType.FINAL_TRANSCRIPT,
-                            alternatives=[SpeechData(language=lang, text=text, confidence=1.0)],
+                            alternatives=[SpeechData(
+                                language=msg.language or self._language,
+                                text=msg.text,
+                                confidence=1.0,
+                            )],
                         )
                     )
-                audio_dur = msg.get("audio_duration_sec", 0.0) or 0.0
+                audio_dur = msg.audio_duration_sec or 0.0
                 self._event_ch.send_nowait(
                     SpeechEvent(
                         type=SpeechEventType.RECOGNITION_USAGE,
@@ -262,5 +252,14 @@ class STTStream(RecognizeStream):
                     )
                 )
 
-            elif msg_type in ("done", "error"):
-                break
+            # Send audio from LiveKit's input channel to the SDK connection
+            async for data in self._input_ch:
+                if isinstance(data, rtc.AudioFrame):
+                    pcm = data.data.tobytes()
+                    await conn.send_audio(pcm)
+
+            # Input exhausted — signal end of stream
+            await conn.end()
+
+        finally:
+            await conn.close()
