@@ -4,10 +4,11 @@ Both clients accept an audio source (file path, file-like object, or URL)
 together with an optional :class:`TranscriptionConfig` and return a
 :class:`TranscriptionResult`.
 
-The API key is sent as a Bearer token in the ``Authorization`` header
-(handled by the transport's ``StaticKeyAuth``).  All config values are
-serialised as multipart form fields; the audio file is attached as a
-standard file upload.
+The API key is sent both as a Bearer token in the ``Authorization``
+header and as an ``api_key`` form field in the request body (aligned
+with the TTS convention).  All config values are serialised as
+multipart form fields; the audio file is attached as a standard
+file upload.
 """
 
 from __future__ import annotations
@@ -131,6 +132,9 @@ class AsyncBatchASR:
         config = config or TranscriptionConfig()
         form = aiohttp.FormData()
 
+        # Attach API key as form field (aligned with TTS convention)
+        form.add_field("api_key", self._auth.get_api_key())
+
         # Attach config fields
         for name, value in config.to_form_fields().items():
             form.add_field(name, value)
@@ -189,6 +193,9 @@ class AsyncBatchASR:
 
         config = config or TranscriptionConfig()
         form = aiohttp.FormData()
+
+        # Attach API key as form field (aligned with TTS convention)
+        form.add_field("api_key", self._auth.get_api_key())
 
         for name, value in config.to_form_fields().items():
             form.add_field(name, value)
@@ -293,6 +300,7 @@ class SyncBatchASR:
         """
         config = config or TranscriptionConfig()
         form_fields = config.to_form_fields()
+        form_fields["api_key"] = self._auth.get_api_key()
 
         if isinstance(audio, (str, Path)):
             path = Path(audio)
@@ -347,6 +355,7 @@ class SyncBatchASR:
         """
         config = config or TranscriptionConfig()
         form_fields = config.to_form_fields()
+        form_fields["api_key"] = self._auth.get_api_key()
         form_fields["url"] = audio_url
 
         self._logger.debug("transcribe_url (sync): %s", audio_url)
