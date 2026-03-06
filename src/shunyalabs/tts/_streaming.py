@@ -44,14 +44,16 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 def _build_ws_payload(
-    auth: StaticKeyAuth,
     text: str,
     config: Optional[TTSConfig],
 ) -> dict:
-    """Build the JSON config frame for the ``/ws/tts`` WebSocket."""
+    """Build the JSON config frame for the ``/ws/tts`` WebSocket.
+
+    Authentication is handled via the ``Authorization`` header on the
+    WebSocket connection, not in the JSON payload.
+    """
     cfg = config or TTSConfig()
     return cfg.to_request_payload(
-        api_key=auth.get_api_key(),
         target_text=text,
         request_type="streaming",
     )
@@ -111,14 +113,13 @@ class AsyncStreamingTTS:
             auth=self._auth,
             conn_config=self._ws_config,
             sdk_component="tts",
-            send_auth_headers=False,
         )
 
         try:
             await transport.connect()
 
-            # 1. Send the config frame (api_key is in the JSON payload).
-            payload = _build_ws_payload(self._auth, text, config)
+            # 1. Send the config frame.
+            payload = _build_ws_payload(text, config)
             logger.debug("WS /ws/tts sending config: %s", list(payload.keys()))
             await transport.send_message(payload)
 
@@ -226,7 +227,6 @@ class AsyncStreamingTTS:
             auth=self._auth,
             conn_config=self._ws_config,
             sdk_component="tts",
-            send_auth_headers=False,
         )
 
         completion: Optional[TTSCompletion] = None
@@ -234,7 +234,7 @@ class AsyncStreamingTTS:
         try:
             await transport.connect()
 
-            payload = _build_ws_payload(self._auth, text, config)
+            payload = _build_ws_payload(text, config)
             await transport.send_message(payload)
 
             with open(dest, "wb") as fh:

@@ -110,6 +110,9 @@ class ShunyalabsSTTService(STTService):
                 open_timeout=10,
                 ping_interval=20,
                 ping_timeout=20,
+                additional_headers={
+                    "Authorization": f"Bearer {self._api_key}",
+                },
             )
             sr = self._sample_rate
             await self._ws.send(
@@ -118,7 +121,6 @@ class ShunyalabsSTTService(STTService):
                         "language": self._language,
                         "sample_rate": sr,
                         "dtype": "int16",
-                        "api_key": self._api_key,
                     }
                 )
             )

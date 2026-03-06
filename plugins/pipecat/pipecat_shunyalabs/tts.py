@@ -100,9 +100,11 @@ class ShunyalabsTTSService(TTSService):
             open_timeout=10,
             ping_interval=20,
             ping_timeout=20,
+            additional_headers={
+                "Authorization": f"Bearer {self._api_key}",
+            },
         ) as ws:
             config = {
-                "api_key": self._api_key,
                 "target_text": formatted,
                 "language": self._language,
                 "output_format": self._output_format,

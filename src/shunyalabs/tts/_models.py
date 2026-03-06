@@ -44,7 +44,8 @@ class TTSConfig(BaseModel):
 
     All fields are optional.  When passed to a synthesis method the values
     are merged into the gateway ``TTSRequestSchema`` JSON body alongside
-    the ``api_key`` and ``target_text`` supplied by the caller.
+    the ``target_text`` supplied by the caller.  Authentication is handled
+    via the ``Authorization`` header.
 
     Attributes:
         reference_wav: Base64-encoded reference audio for voice cloning.
@@ -120,14 +121,15 @@ class TTSConfig(BaseModel):
 
     def to_request_payload(
         self,
-        api_key: str,
         target_text: str,
         request_type: Literal["batch", "streaming"] = "batch",
     ) -> dict:
         """Build a dict matching the gateway ``TTSRequestSchema``.
 
+        Authentication is handled via the ``Authorization`` header,
+        not in the payload.
+
         Args:
-            api_key: API key for authentication.
             target_text: The text to synthesise.
             request_type: ``"batch"`` or ``"streaming"``.
 
@@ -136,7 +138,6 @@ class TTSConfig(BaseModel):
             ``POST /tts`` or sent over the ``/ws/tts`` WebSocket.
         """
         payload: dict = {
-            "api_key": api_key,
             "target_text": target_text,
             "request_type": request_type,
         }

@@ -128,8 +128,8 @@ class TranscriptionResult(BaseModel):
 class StreamingConfig(BaseModel):
     """Configuration sent as the first JSON frame over the WebSocket.
 
-    The ``api_key`` field is injected by the SDK from the ``StaticKeyAuth``
-    instance; callers should not set it manually.
+    Authentication is handled via the ``Authorization`` header on the
+    WebSocket connection, not in the JSON payload.
     """
 
     language: str = "auto"
@@ -137,7 +137,6 @@ class StreamingConfig(BaseModel):
     dtype: str = "int16"
     chunk_size_sec: float = 1.0
     silence_threshold_sec: float = 0.5
-    api_key: Optional[str] = None
 
     def to_ws_payload(self) -> Dict[str, Any]:
         """Return the dict to serialise as the WebSocket config frame.

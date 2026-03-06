@@ -1,8 +1,8 @@
 """Batch TTS clients for the Shunyalabs SDK.
 
 Provides :class:`AsyncBatchTTS` and :class:`SyncBatchTTS` which map to
-``POST /tts`` on the TTS gateway.  The API key is sent inside the JSON
-body (not as an HTTP header) to match the gateway's ``TTSRequestSchema``.
+``POST /tts`` on the TTS gateway.  The API key is sent as a Bearer
+token in the ``Authorization`` header.
 """
 
 from __future__ import annotations
@@ -24,17 +24,17 @@ logger = get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 def _build_payload(
-    auth: StaticKeyAuth,
     text: str,
     config: Optional[TTSConfig],
 ) -> dict:
     """Build the JSON body for ``POST /tts``.
 
     If *config* is ``None`` a default :class:`TTSConfig` is used.
+    Authentication is handled via the ``Authorization`` header, not
+    in the JSON body.
     """
     cfg = config or TTSConfig()
     return cfg.to_request_payload(
-        api_key=auth.get_api_key(),
         target_text=text,
         request_type="batch",
     )
@@ -81,7 +81,7 @@ class AsyncBatchTTS:
         Raises:
             SynthesisError: If the gateway returns an error response.
         """
-        payload = _build_payload(self._auth, text, config)
+        payload = _build_payload(text, config)
         logger.debug("POST /tts payload keys: %s", list(payload.keys()))
 
         try:
@@ -139,7 +139,7 @@ class SyncBatchTTS:
         Raises:
             SynthesisError: If the gateway returns an error response.
         """
-        payload = _build_payload(self._auth, text, config)
+        payload = _build_payload(text, config)
         logger.debug("POST /tts payload keys: %s", list(payload.keys()))
 
         try:

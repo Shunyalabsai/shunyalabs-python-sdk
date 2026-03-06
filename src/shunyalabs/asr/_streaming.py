@@ -275,10 +275,7 @@ class AsyncStreamingASR:
             SessionError: If the server does not acknowledge with a ``ready`` message.
         """
         config = config or StreamingConfig()
-
-        # Inject the API key into the config payload
         payload = config.to_ws_payload()
-        payload["api_key"] = self._auth.get_api_key()
 
         transport = WsTransport(
             url=self._ws_url,
