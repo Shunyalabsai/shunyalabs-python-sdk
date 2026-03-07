@@ -26,6 +26,7 @@ class TranscriptionConfig(BaseModel):
     ``POST /v1/transcriptions``.  Only non-``None`` values are sent.
     """
 
+    model: str
     language_code: str = "auto"
     task: str = "transcribe"
     output_script: str = "auto"

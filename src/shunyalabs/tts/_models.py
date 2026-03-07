@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 class OutputFormat(str, Enum):
     """Supported audio output formats.
 
-    Values correspond to the ``output_format`` field accepted by the TTS
+    Values correspond to the ``response_format`` field accepted by the TTS
     gateway's ``TTSRequestSchema``.
     """
 
@@ -40,61 +40,52 @@ class OutputFormat(str, Enum):
 # ---------------------------------------------------------------------------
 
 class TTSConfig(BaseModel):
-    """Configuration for a TTS synthesis request.
+    """Configuration for a TTS synthesis request (OpenAI-compatible).
 
     All fields are optional.  When passed to a synthesis method the values
     are merged into the gateway ``TTSRequestSchema`` JSON body alongside
-    the ``target_text`` supplied by the caller.  Authentication is handled
-    via the ``Authorization`` header.
+    the ``input`` text supplied by the caller.  Authentication is handled
+    via the ``Authorization: Bearer`` header.
 
     Attributes:
-        reference_wav: Base64-encoded reference audio for voice cloning.
-        reference_text: Transcript of the reference audio.
-        max_tokens: Maximum tokens for LLM generation (1--8192).
+        model: Model name (default ``"zero-indic"``).
+        voice: Speaker voice name (e.g. ``"Varun"``, ``"Nisha"``).
+        response_format: Output audio format (default ``"mp3"``).
+        speed: Speaking speed multiplier (0.25--4.0).
         language: ISO 639-1/639-2 language code (2--3 chars).
-        output_format: Desired audio output format.
-        speaker_id: Pre-computed speaker voice identifier.
-        speed: Speaking speed multiplier (0.5--2.0).
         trim_silence: Strip leading/trailing silence from audio.
         volume_normalization: ``"peak"`` or ``"loudness"``, or *None*.
         word_timestamps: Request word-level timestamps (batch only).
         background_audio: Preset name or base64-encoded background audio.
         background_volume: Background volume relative to speech (0.0--1.0).
+        max_tokens: Maximum tokens for LLM generation (1--8192).
+        reference_wav: Base64-encoded reference audio for voice cloning.
+        reference_text: Transcript of the reference audio.
     """
 
-    reference_wav: Optional[str] = Field(
-        None,
-        description="Base64-encoded reference audio for voice cloning.",
+    model: str = Field(
+        ...,
+        description="Model name (e.g. 'zero-indic').",
     )
-    reference_text: Optional[str] = Field(
-        "",
-        description="Transcript of the reference audio.",
+    voice: str = Field(
+        ...,
+        description="Speaker voice name (e.g. 'Varun', 'Nisha', 'Rajesh').",
     )
-    max_tokens: int = Field(
-        2048,
-        ge=1,
-        le=8192,
-        description="Maximum tokens for LLM generation.",
+    response_format: Optional[OutputFormat] = Field(
+        OutputFormat.MP3,
+        description="Output audio format.",
+    )
+    speed: Optional[float] = Field(
+        1.0,
+        ge=0.25,
+        le=4.0,
+        description="Speaking speed multiplier.",
     )
     language: Optional[str] = Field(
         None,
         min_length=2,
         max_length=3,
         description="ISO 639-1/639-2 language code.",
-    )
-    output_format: Optional[OutputFormat] = Field(
-        OutputFormat.PCM,
-        description="Output audio format.",
-    )
-    speaker_id: Optional[str] = Field(
-        None,
-        description="Pre-computed speaker voice identifier.",
-    )
-    speed: Optional[float] = Field(
-        1.0,
-        ge=0.5,
-        le=2.0,
-        description="Speaking speed multiplier.",
     )
     trim_silence: Optional[bool] = Field(
         False,
@@ -118,27 +109,42 @@ class TTSConfig(BaseModel):
         le=1.0,
         description="Background audio volume relative to speech.",
     )
+    max_tokens: int = Field(
+        2048,
+        ge=1,
+        le=8192,
+        description="Maximum tokens for LLM generation.",
+    )
+    reference_wav: Optional[str] = Field(
+        None,
+        description="Base64-encoded reference audio for voice cloning.",
+    )
+    reference_text: Optional[str] = Field(
+        "",
+        description="Transcript of the reference audio.",
+    )
 
     def to_request_payload(
         self,
-        target_text: str,
+        text: str,
         request_type: Literal["batch", "streaming"] = "batch",
     ) -> dict:
         """Build a dict matching the gateway ``TTSRequestSchema``.
 
-        Authentication is handled via the ``Authorization`` header,
-        not in the payload.
+        Uses OpenAI-compatible field names (``input``, ``model``,
+        ``voice``, ``response_format``).  Authentication is handled
+        via the ``Authorization`` header, not in the payload.
 
         Args:
-            target_text: The text to synthesise.
+            text: The text to synthesise.
             request_type: ``"batch"`` or ``"streaming"``.
 
         Returns:
             A dict ready to be serialised as the JSON body for
-            ``POST /tts`` or sent over the ``/ws/tts`` WebSocket.
+            ``POST /v1/audio/speech`` or sent over ``/ws/tts``.
         """
         payload: dict = {
-            "target_text": target_text,
+            "input": text,
             "request_type": request_type,
         }
 
@@ -210,6 +216,35 @@ class TTSResult(BaseModel):
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(self.audio_data)
+
+    @classmethod
+    def from_raw_audio(
+        cls,
+        audio_bytes: bytes,
+        *,
+        format: str = "mp3",
+        sample_rate: int = 16000,
+    ) -> "TTSResult":
+        """Construct a ``TTSResult`` from raw binary audio data.
+
+        Used with the OpenAI-compatible ``/v1/audio/speech`` endpoint
+        which returns raw audio bytes directly.
+
+        Args:
+            audio_bytes: Raw audio bytes from the gateway response.
+            format: Audio format string (e.g. ``"mp3"``, ``"pcm"``).
+            sample_rate: Audio sample rate in Hz.
+
+        Returns:
+            A populated ``TTSResult`` instance.
+        """
+        return cls(
+            request_id="",
+            audio_data=audio_bytes,
+            sample_rate=sample_rate,
+            duration_seconds=0.0,
+            format=format,
+        )
 
     @classmethod
     def from_api_response(cls, data: dict) -> "TTSResult":

@@ -29,7 +29,6 @@ from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-import httpx
 from livekit import rtc
 from livekit.agents import (
     APIConnectOptions,
@@ -49,8 +48,10 @@ from livekit.agents.stt import (
 )
 
 from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._http_transport import AsyncHttpTransport
 from shunyalabs._core._models import WsConnectionConfig
-from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
+from shunyalabs.asr._batch import AsyncBatchASR
+from shunyalabs.asr._models import StreamingConfig, StreamingMessageType, TranscriptionConfig
 from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
 
 from ._version import __version__
@@ -124,7 +125,7 @@ class STT(stt.STT):
         language: NotGivenOr[str] = NOT_GIVEN,
         conn_options: APIConnectOptions,
     ) -> SpeechEvent:
-        """Batch transcription: POST audio to /v1/transcriptions."""
+        """Batch transcription via the SDK's AsyncBatchASR."""
         frames = buffer if isinstance(buffer, list) else [buffer]
         pcm = b"".join(f.data.tobytes() for f in frames)
         sample_rate = frames[0].sample_rate if frames else 16000
@@ -136,24 +137,30 @@ class STT(stt.STT):
             wf.setsampwidth(2)  # int16
             wf.setframerate(sample_rate)
             wf.writeframes(pcm)
+        wav_buf.seek(0)
+        wav_buf.name = "audio.wav"
 
-        async with httpx.AsyncClient(timeout=conn_options.timeout) as client:
-            resp = await client.post(
-                f"{self._api_url}/v1/transcriptions",
-                headers=self._auth.get_auth_headers(),
-                files={"file": ("audio.wav", wav_buf.getvalue(), "audio/wav")},
-                data={"language": lang},
+        transport = AsyncHttpTransport(
+            url=self._api_url,
+            auth=self._auth,
+        )
+        batch = AsyncBatchASR(auth=self._auth, transport=transport)
+        try:
+            config = TranscriptionConfig(
+                model="zero-indic",
+                language_code=lang,
             )
-            resp.raise_for_status()
-            data = resp.json()
+            result = await batch.transcribe(audio=wav_buf, config=config)
+        finally:
+            await batch.close()
 
-        audio_duration = data.get("audio_duration", 0.0) or 0.0
+        audio_duration = result.audio_duration or 0.0
         return SpeechEvent(
             type=SpeechEventType.FINAL_TRANSCRIPT,
             alternatives=[
                 SpeechData(
-                    language=data.get("detected_language", lang),
-                    text=data.get("text", ""),
+                    language=result.detected_language or lang,
+                    text=result.text,
                     confidence=1.0,
                 )
             ],

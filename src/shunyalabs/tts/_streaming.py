@@ -54,7 +54,7 @@ def _build_ws_payload(
     """
     cfg = config or TTSConfig()
     return cfg.to_request_payload(
-        target_text=text,
+        text=text,
         request_type="streaming",
     )
 

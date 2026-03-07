@@ -38,7 +38,9 @@ from livekit.agents.tts import (
 )
 
 from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._http_transport import AsyncHttpTransport
 from shunyalabs._core._models import WsConnectionConfig
+from shunyalabs.tts._batch import AsyncBatchTTS
 from shunyalabs.tts._models import TTSConfig
 from shunyalabs.tts._streaming import AsyncStreamingTTS
 
@@ -46,7 +48,8 @@ from ._version import __version__
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_WS_URL = "wss://tts.shunyalabs.ai/ws/tts"
+_DEFAULT_API_URL = "https://tts.shunyalabs.ai"
+_DEFAULT_WS_URL = "wss://tts.shunyalabs.ai/ws"
 
 
 class TTS(tts.TTS):
@@ -69,7 +72,10 @@ class TTS(tts.TTS):
         self,
         *,
         api_key: Optional[str] = None,
+        api_url: str = _DEFAULT_API_URL,
         ws_url: str = _DEFAULT_WS_URL,
+        model: str = "zero-indic",
+        voice: str = "Rajesh",
         speaker: str = "Rajesh",
         style: str = "<Neutral>",
         language: str = "en",
@@ -87,7 +93,10 @@ class TTS(tts.TTS):
             raise ValueError(
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
+        self._api_url = api_url.rstrip("/")
         self._ws_url = ws_url
+        self._model = model
+        self._voice = voice
         self._speaker = speaker
         self._style = style
         self._language = language
@@ -97,7 +106,7 @@ class TTS(tts.TTS):
 
     @property
     def model(self) -> str:
-        return "nirukti"
+        return self._model
 
     @property
     def provider(self) -> str:
@@ -110,10 +119,20 @@ class TTS(tts.TTS):
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""
         return TTSConfig(
+            model=self._model,
+            voice=self._voice,
             language=self._language,
-            output_format=self._output_format,
+            response_format=self._output_format,
             speed=self._speed,
         )
+
+    def _make_batch_tts(self) -> AsyncBatchTTS:
+        """Create an AsyncBatchTTS instance using the SDK."""
+        transport = AsyncHttpTransport(
+            url=self._api_url,
+            auth=self._auth,
+        )
+        return AsyncBatchTTS(auth=self._auth, transport=transport)
 
     def _make_streaming_tts(self) -> AsyncStreamingTTS:
         """Create an AsyncStreamingTTS instance using the SDK."""
@@ -172,11 +191,14 @@ class ChunkedTTSStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
-        streaming_tts = self._tts._make_streaming_tts()
+        batch_tts = self._tts._make_batch_tts()
         config = self._tts._make_tts_config()
 
-        async for audio_bytes in streaming_tts.stream(formatted, config=config):
-            output_emitter.push(audio_bytes)
+        try:
+            result = await batch_tts.synthesize(formatted, config=config)
+            output_emitter.push(result.audio_data)
+        finally:
+            await batch_tts._transport.close()
 
 
 class StreamingTTS(SynthesizeStream):

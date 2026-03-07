@@ -59,7 +59,10 @@ class AsyncHttpTransport:
                 connect=self._conn_config.connect_timeout,
                 total=self._conn_config.operation_timeout,
             )
-            self._session = aiohttp.ClientSession(timeout=timeout)
+            self._session = aiohttp.ClientSession(
+                timeout=timeout,
+                headers={"Accept-Encoding": "gzip, deflate"},
+            )
         return self._session
 
     async def post_json(
@@ -88,6 +91,45 @@ class AsyncHttpTransport:
                             continue
                         raise_for_status(resp.status, body)
                     return body
+            except aiohttp.ClientConnectionError as e:
+                last_exception = ConnectionError(f"Connection failed: {e}")
+                if attempt < self._max_retries:
+                    continue
+                raise last_exception
+            except aiohttp.ServerTimeoutError as e:
+                last_exception = TimeoutError(f"Request timed out: {e}")
+                if attempt < self._max_retries:
+                    continue
+                raise last_exception
+
+        raise last_exception or TransportError("Request failed")
+
+    async def post_json_raw(
+        self,
+        path: str,
+        json_data: Optional[dict] = None,
+        headers: Optional[dict] = None,
+    ) -> bytes:
+        """POST JSON data and return raw binary response."""
+        import aiohttp
+
+        session = await self._get_session()
+        url = f"{self._url}{path}"
+        req_headers = self._auth.get_auth_headers()
+        if headers:
+            req_headers.update(headers)
+
+        last_exception = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                async with session.post(url, json=json_data, headers=req_headers) as resp:
+                    if resp.status >= 400:
+                        body = await resp.json(content_type=None)
+                        if should_retry(resp.status) and attempt < self._max_retries:
+                            last_exception = TransportError(f"HTTP {resp.status}")
+                            continue
+                        raise_for_status(resp.status, body)
+                    return await resp.read()
             except aiohttp.ClientConnectionError as e:
                 last_exception = ConnectionError(f"Connection failed: {e}")
                 if attempt < self._max_retries:
@@ -214,6 +256,45 @@ class SyncHttpTransport:
                         continue
                     raise_for_status(resp.status_code, body)
                 return body
+            except httpx.ConnectError as e:
+                last_exception = ConnectionError(f"Connection failed: {e}")
+                if attempt < self._max_retries:
+                    continue
+                raise last_exception
+            except httpx.ReadTimeout as e:
+                last_exception = TimeoutError(f"Request timed out: {e}")
+                if attempt < self._max_retries:
+                    continue
+                raise last_exception
+
+        raise last_exception or TransportError("Request failed")
+
+    def post_json_raw(
+        self,
+        path: str,
+        json_data: Optional[dict] = None,
+        headers: Optional[dict] = None,
+    ) -> bytes:
+        """POST JSON data and return raw binary response."""
+        import httpx
+
+        client = self._get_client()
+        url = f"{self._url}{path}"
+        req_headers = self._auth.get_auth_headers()
+        if headers:
+            req_headers.update(headers)
+
+        last_exception = None
+        for attempt in range(self._max_retries + 1):
+            try:
+                resp = client.post(url, json=json_data, headers=req_headers)
+                if resp.status_code >= 400:
+                    body = resp.json()
+                    if should_retry(resp.status_code) and attempt < self._max_retries:
+                        last_exception = TransportError(f"HTTP {resp.status_code}")
+                        continue
+                    raise_for_status(resp.status_code, body)
+                return resp.content
             except httpx.ConnectError as e:
                 last_exception = ConnectionError(f"Connection failed: {e}")
                 if attempt < self._max_retries:

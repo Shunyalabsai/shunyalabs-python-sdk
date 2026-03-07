@@ -25,7 +25,7 @@ def main():
     # Synthesis with custom config
     config = TTSConfig(
         language="en",
-        output_format=OutputFormat.WAV,
+        response_format=OutputFormat.WAV,
         speed=1.2,
         word_timestamps=True,
     )

@@ -1,8 +1,9 @@
-"""Batch TTS clients for the Shunyalabs SDK.
+"""Batch TTS clients for the Shunyalabs SDK (OpenAI-compatible).
 
 Provides :class:`AsyncBatchTTS` and :class:`SyncBatchTTS` which map to
-``POST /tts`` on the TTS gateway.  The API key is sent as a Bearer
-token in the ``Authorization`` header.
+``POST /v1/audio/speech`` on the TTS gateway.  The API key is sent as a
+Bearer token in the ``Authorization`` header.  The endpoint returns raw
+binary audio data (not JSON).
 """
 
 from __future__ import annotations
@@ -23,11 +24,14 @@ logger = get_logger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+_TTS_PATH = "/"
+
+
 def _build_payload(
     text: str,
     config: Optional[TTSConfig],
 ) -> dict:
-    """Build the JSON body for ``POST /tts``.
+    """Build the JSON body for ``POST /``.
 
     If *config* is ``None`` a default :class:`TTSConfig` is used.
     Authentication is handled via the ``Authorization`` header, not
@@ -35,7 +39,7 @@ def _build_payload(
     """
     cfg = config or TTSConfig()
     return cfg.to_request_payload(
-        target_text=text,
+        text=text,
         request_type="batch",
     )
 
@@ -45,9 +49,10 @@ def _build_payload(
 # ---------------------------------------------------------------------------
 
 class AsyncBatchTTS:
-    """Async batch TTS client.
+    """Async batch TTS client (OpenAI-compatible).
 
-    Maps to ``POST /tts`` on the TTS gateway.
+    Maps to ``POST /v1/audio/speech`` on the TTS gateway.  The endpoint
+    returns raw binary audio data.
 
     Args:
         auth: Authentication instance providing the API key.
@@ -75,27 +80,22 @@ class AsyncBatchTTS:
             config: Optional :class:`TTSConfig` overriding defaults.
 
         Returns:
-            A :class:`TTSResult` containing decoded audio bytes plus
-            metadata.
+            A :class:`TTSResult` containing audio bytes plus metadata.
 
         Raises:
             SynthesisError: If the gateway returns an error response.
         """
+        cfg = config or TTSConfig()
         payload = _build_payload(text, config)
-        logger.debug("POST /tts payload keys: %s", list(payload.keys()))
+        logger.debug("POST %s payload keys: %s", _TTS_PATH, list(payload.keys()))
 
         try:
-            response_data = await self._transport.post_json("/tts", json_data=payload)
+            audio_bytes = await self._transport.post_json_raw(_TTS_PATH, json_data=payload)
         except Exception as exc:
             raise SynthesisError(f"Batch synthesis request failed: {exc}") from exc
 
-        # Check for gateway-level error body.
-        if isinstance(response_data, dict) and "error" in response_data:
-            raise SynthesisError(
-                response_data.get("error", "Unknown synthesis error")
-            )
-
-        return TTSResult.from_api_response(response_data)
+        fmt = cfg.response_format.value if cfg.response_format else "mp3"
+        return TTSResult.from_raw_audio(audio_bytes, format=fmt)
 
 
 # ---------------------------------------------------------------------------
@@ -103,9 +103,10 @@ class AsyncBatchTTS:
 # ---------------------------------------------------------------------------
 
 class SyncBatchTTS:
-    """Synchronous batch TTS client.
+    """Synchronous batch TTS client (OpenAI-compatible).
 
-    Maps to ``POST /tts`` on the TTS gateway.
+    Maps to ``POST /v1/audio/speech`` on the TTS gateway.  The endpoint
+    returns raw binary audio data.
 
     Args:
         auth: Authentication instance providing the API key.
@@ -133,27 +134,22 @@ class SyncBatchTTS:
             config: Optional :class:`TTSConfig` overriding defaults.
 
         Returns:
-            A :class:`TTSResult` containing decoded audio bytes plus
-            metadata.
+            A :class:`TTSResult` containing audio bytes plus metadata.
 
         Raises:
             SynthesisError: If the gateway returns an error response.
         """
+        cfg = config or TTSConfig()
         payload = _build_payload(text, config)
-        logger.debug("POST /tts payload keys: %s", list(payload.keys()))
+        logger.debug("POST %s payload keys: %s", _TTS_PATH, list(payload.keys()))
 
         try:
-            response_data = self._transport.post_json("/tts", json_data=payload)
+            audio_bytes = self._transport.post_json_raw(_TTS_PATH, json_data=payload)
         except Exception as exc:
             raise SynthesisError(f"Batch synthesis request failed: {exc}") from exc
 
-        # Check for gateway-level error body.
-        if isinstance(response_data, dict) and "error" in response_data:
-            raise SynthesisError(
-                response_data.get("error", "Unknown synthesis error")
-            )
-
-        return TTSResult.from_api_response(response_data)
+        fmt = cfg.response_format.value if cfg.response_format else "mp3"
+        return TTSResult.from_raw_audio(audio_bytes, format=fmt)
 
 
 __all__ = ["AsyncBatchTTS", "SyncBatchTTS"]

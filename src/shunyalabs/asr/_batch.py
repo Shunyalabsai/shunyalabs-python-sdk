@@ -30,7 +30,7 @@ from ._models import TranscriptionConfig, TranscriptionResult
 
 logger = get_logger(__name__)
 
-_TRANSCRIPTIONS_PATH = "/v1/transcriptions"
+_TRANSCRIPTIONS_PATH = "/v1/audio/transcriptions"
 
 
 # ---------------------------------------------------------------------------
