@@ -4,9 +4,9 @@
 [![Python](https://img.shields.io/pypi/pyversions/shunyalabs.svg)](https://pypi.org/project/shunyalabs/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-The official Python SDK for [Shunyalabs](https://shunyalabs.ai) Speech AI APIs — **ASR** (speech-to-text), **TTS** (text-to-speech), and **Flow** (conversational AI).
+The official Python SDK for [Shunyalabs](https://shunyalabs.ai) Speech AI APIs — **ASR** (speech-to-text) and **TTS** (text-to-speech).
 
-Supports both **synchronous** and **asynchronous** clients with HTTP batch and WebSocket streaming modes.
+Supports HTTP batch and WebSocket streaming modes with a fully async client.
 
 ## Installation
 
@@ -19,7 +19,6 @@ Install only what you need:
 ```bash
 pip install shunyalabs[ASR]     # Speech-to-text only
 pip install shunyalabs[TTS]     # Text-to-speech only
-pip install shunyalabs[flow]    # Conversational AI
 pip install shunyalabs[extras]  # Audio playback helpers (sounddevice)
 ```
 
@@ -28,13 +27,12 @@ pip install shunyalabs[extras]  # Audio playback helpers (sounddevice)
 All API calls use `Authorization: Bearer <api_key>` header authentication.
 
 ```python
-# Option 1: Pass directly
-client = AsyncShunyaClient(api_key="your-api-key")
+from shunyalabs import AsyncShunyaClient
 
-# Option 2: Environment variable (recommended)
-# export SHUNYALABS_API_KEY="your-api-key"
-client = AsyncShunyaClient()  # auto-reads from env
+client = AsyncShunyaClient(api_key="your-api-key")
 ```
+
+Or set the `SHUNYALABS_API_KEY` environment variable and omit `api_key=`.
 
 ---
 
@@ -48,7 +46,7 @@ from shunyalabs import AsyncShunyaClient
 from shunyalabs.tts import TTSConfig
 
 async def main():
-    async with AsyncShunyaClient() as client:
+    async with AsyncShunyaClient(api_key="your-api-key") as client:
         result = await client.tts.synthesize(
             "Hello, world!",
             config=TTSConfig(model="zero-indic", voice="Varun"),
@@ -67,7 +65,7 @@ from shunyalabs import AsyncShunyaClient
 from shunyalabs.tts import TTSConfig
 
 async def main():
-    async with AsyncShunyaClient() as client:
+    async with AsyncShunyaClient(api_key="your-api-key") as client:
         chunks = []
         async for audio in await client.tts.stream(
             "Hello, world!",
@@ -87,7 +85,7 @@ from shunyalabs import AsyncShunyaClient
 from shunyalabs.asr import TranscriptionConfig
 
 async def main():
-    async with AsyncShunyaClient() as client:
+    async with AsyncShunyaClient(api_key="your-api-key") as client:
         result = await client.asr.transcribe(
             "audio.wav",
             config=TranscriptionConfig(model="zero-indic"),
@@ -105,7 +103,7 @@ from shunyalabs import AsyncShunyaClient
 from shunyalabs.asr import StreamingConfig, StreamingMessageType
 
 async def main():
-    async with AsyncShunyaClient() as client:
+    async with AsyncShunyaClient(api_key="your-api-key") as client:
         conn = await client.asr.stream(
             config=StreamingConfig(language="en", sample_rate=16000),
         )
@@ -133,27 +131,13 @@ async def main():
 asyncio.run(main())
 ```
 
-### Synchronous Client
-
-```python
-from shunyalabs import ShunyaClient
-from shunyalabs.tts import TTSConfig
-
-with ShunyaClient() as client:
-    result = client.tts.synthesize("Hello!", config=TTSConfig(model="zero-indic", voice="Varun"))
-    result.save("hello.mp3")
-
-    result = client.asr.transcribe("audio.wav")
-    print(result.text)
-```
-
 ---
 
 ## API Reference
 
 ### Client Configuration
 
-#### `AsyncShunyaClient` / `ShunyaClient`
+#### `AsyncShunyaClient`
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -164,9 +148,26 @@ with ShunyaClient() as client:
 | `asr_ws_url` | `str` | `wss://asr.shunyalabs.ai/ws` | ASR streaming WebSocket URL. |
 | `tts_url` | `str` | `https://tts.shunyalabs.ai` | TTS batch API base URL. |
 | `tts_ws_url` | `str` | `wss://tts.shunyalabs.ai/ws` | TTS streaming WebSocket URL. |
-| `flow_url` | `str` | `wss://flow.api.shunyalabs.com/v1/flow` | Flow WebSocket URL. |
 
-All URL parameters can also be set via environment variables: `SHUNYALABS_ASR_URL`, `SHUNYALABS_ASR_WS_URL`, `SHUNYALABS_TTS_URL`, `SHUNYALABS_TTS_WS_URL`, `SHUNYALABS_FLOW_URL`.
+All URL parameters can also be set via environment variables: `SHUNYALABS_ASR_URL`, `SHUNYALABS_ASR_WS_URL`, `SHUNYALABS_TTS_URL`, `SHUNYALABS_TTS_WS_URL`.
+
+**Examples:**
+
+```python
+# Default — uses production endpoints
+client = AsyncShunyaClient(api_key="your-api-key")
+
+# Custom timeout and retries
+client = AsyncShunyaClient(api_key="your-api-key", timeout=120.0, max_retries=5)
+
+# Self-hosted endpoints
+client = AsyncShunyaClient(
+    api_key="your-api-key",
+    asr_url="https://my-asr-server.example.com",
+    tts_url="https://my-tts-server.example.com",
+    tts_ws_url="wss://my-tts-server.example.com/ws",
+)
+```
 
 ---
 
@@ -179,18 +180,241 @@ Configuration for synthesis requests. Passed as `config=` to `synthesize()` and 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `model` | `str` | **required** | Model name (e.g. `"zero-indic"`). |
-| `voice` | `str` | **required** | Speaker voice name (e.g. `"Varun"`, `"Nisha"`, `"Rajesh"`). |
+| `voice` | `str` | **required** | Speaker voice name. See [Available Speakers](#available-speakers). |
 | `response_format` | `OutputFormat` | `"mp3"` | Output audio format. See [Output Formats](#output-formats). |
 | `speed` | `float` | `1.0` | Speaking speed multiplier (0.25–4.0). |
-| `language` | `str` | `None` | ISO 639-1/639-2 language code (2–3 chars). |
 | `trim_silence` | `bool` | `False` | Trim leading/trailing silence from audio. |
 | `volume_normalization` | `str` | `None` | `"peak"` or `"loudness"`. |
 | `word_timestamps` | `bool` | `False` | Return word-level timestamps (batch only). |
 | `background_audio` | `str` | `None` | Preset name or base64-encoded background audio. |
 | `background_volume` | `float` | `0.1` | Background volume relative to speech (0.0–1.0). |
-| `max_tokens` | `int` | `2048` | Maximum tokens for LLM generation (1–8192). |
-| `reference_wav` | `str` | `None` | Base64-encoded reference audio for voice cloning. |
-| `reference_text` | `str` | `""` | Transcript of the reference audio. |
+
+#### TTS Parameter Examples
+
+**`model` — Select the TTS model**
+
+```python
+# Currently available: "zero-indic"
+config = TTSConfig(model="zero-indic", voice="Rajesh")
+result = await client.tts.synthesize("Hello!", config=config)
+# Output: 48000 bytes saved to output.mp3
+```
+
+**`voice` — Choose a speaker**
+
+```python
+# Male English speaker
+config = TTSConfig(model="zero-indic", voice="Varun")
+
+# Female Hindi speaker
+config = TTSConfig(model="zero-indic", voice="Sunita")
+
+# Any speaker can speak any language — voice only controls vocal characteristics
+config = TTSConfig(model="zero-indic", voice="Murugan")  # Tamil-native male speaking English
+result = await client.tts.synthesize("Good morning, how are you?", config=config)
+```
+
+**`response_format` — Output audio format**
+
+Values: `"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`, `"mulaw"`, `"alaw"`
+
+```python
+# MP3 (default) — compressed, good for storage
+config = TTSConfig(model="zero-indic", voice="Varun", response_format="mp3")
+result = await client.tts.synthesize("Hello!", config=config)
+result.save("output.mp3")
+# Output: 12480 bytes (compressed)
+
+# WAV — uncompressed, good for processing
+config = TTSConfig(model="zero-indic", voice="Varun", response_format="wav")
+result = await client.tts.synthesize("Hello!", config=config)
+result.save("output.wav")
+# Output: 96044 bytes (uncompressed with header)
+
+# PCM — raw samples, for real-time pipelines
+config = TTSConfig(model="zero-indic", voice="Varun", response_format="pcm")
+result = await client.tts.synthesize("Hello!", config=config)
+# Output: 96000 bytes (raw 16-bit samples)
+
+# OGG Opus — compressed, good for web streaming
+config = TTSConfig(model="zero-indic", voice="Varun", response_format="ogg_opus")
+
+# mu-law / A-law — for telephony systems
+config = TTSConfig(model="zero-indic", voice="Varun", response_format="mulaw")
+config = TTSConfig(model="zero-indic", voice="Varun", response_format="alaw")
+```
+
+**`speed` — Speaking speed multiplier**
+
+Range: `0.25` (very slow) to `4.0` (very fast). Default: `1.0`.
+
+```python
+# Slow — good for language learning
+config = TTSConfig(model="zero-indic", voice="Nisha", speed=0.75)
+result = await client.tts.synthesize("Take your time to understand this.", config=config)
+# Output: longer audio, ~33% slower than normal
+
+# Normal speed (default)
+config = TTSConfig(model="zero-indic", voice="Nisha", speed=1.0)
+
+# Fast — good for notifications or summaries
+config = TTSConfig(model="zero-indic", voice="Nisha", speed=1.5)
+result = await client.tts.synthesize("Quick update: your order has shipped.", config=config)
+# Output: shorter audio, ~50% faster than normal
+
+# Very fast
+config = TTSConfig(model="zero-indic", voice="Nisha", speed=2.0)
+```
+
+**`trim_silence` — Remove silence padding**
+
+```python
+# Without trim (default) — audio may have leading/trailing silence
+config = TTSConfig(model="zero-indic", voice="Rajesh", trim_silence=False)
+result = await client.tts.synthesize("Hello.", config=config)
+# Output: 64000 bytes (includes silence padding)
+
+# With trim — tighter audio, no dead air
+config = TTSConfig(model="zero-indic", voice="Rajesh", trim_silence=True)
+result = await client.tts.synthesize("Hello.", config=config)
+# Output: 48000 bytes (silence stripped)
+```
+
+**`volume_normalization` — Normalize audio loudness**
+
+Values: `None` (off), `"peak"`, `"loudness"`
+
+```python
+# No normalization (default)
+config = TTSConfig(model="zero-indic", voice="Rajesh")
+
+# Peak normalization — scale so the loudest sample hits 0 dBFS
+config = TTSConfig(model="zero-indic", voice="Rajesh", volume_normalization="peak")
+result = await client.tts.synthesize("This audio will have consistent peak levels.", config=config)
+
+# Loudness normalization — perceptually even loudness (EBU R128)
+config = TTSConfig(model="zero-indic", voice="Rajesh", volume_normalization="loudness")
+result = await client.tts.synthesize("This audio will sound equally loud regardless of content.", config=config)
+```
+
+**`word_timestamps` — Get timing for each word (batch only)**
+
+```python
+config = TTSConfig(model="zero-indic", voice="Varun", word_timestamps=True)
+result = await client.tts.synthesize("Hello world, how are you?", config=config)
+
+for wt in result.word_timestamps:
+    print(f"  '{wt.word}' — {wt.start:.2f}s to {wt.end:.2f}s")
+
+# Output:
+#   'Hello' — 0.00s to 0.32s
+#   'world,' — 0.32s to 0.68s
+#   'how' — 0.72s to 0.88s
+#   'are' — 0.88s to 1.02s
+#   'you?' — 1.02s to 1.28s
+```
+
+**`background_audio` + `background_volume` — Add background music**
+
+```python
+import base64
+
+# Using a preset name
+config = TTSConfig(
+    model="zero-indic",
+    voice="Nisha",
+    background_audio="cafe-ambience",
+    background_volume=0.15,  # 15% volume relative to speech
+)
+result = await client.tts.synthesize("Welcome to our podcast.", config=config)
+
+# Using custom audio (base64-encoded)
+with open("background.mp3", "rb") as f:
+    bg_b64 = base64.b64encode(f.read()).decode()
+
+config = TTSConfig(
+    model="zero-indic",
+    voice="Nisha",
+    background_audio=bg_b64,
+    background_volume=0.1,  # 10% volume (subtle background)
+)
+result = await client.tts.synthesize("Welcome to our podcast.", config=config)
+result.save("podcast_intro.mp3")
+```
+
+#### Available Speakers
+
+Each speaker has a native language listed below, but **every speaker can speak in any language** — the native language only indicates the speaker's voice characteristics and accent.
+
+| Language | Male Speaker | Female Speaker |
+|----------|-------------|----------------|
+| Assamese | `Bimal` | `Anjana` |
+| Bengali | `Arjun` | `Priyanka` |
+| Bodo | `Daimalu` | `Hasina` |
+| Dogri | `Vishal` | `Neelam` |
+| English | `Varun` | `Nisha` |
+| Gujarati | `Rakesh` | `Pooja` |
+| Hindi | `Rajesh` | `Sunita` |
+| Kannada | `Kiran` | `Shreya` |
+| Kashmiri | `Farooq` | `Habba` |
+| Konkani | `Mohan` | `Sarita` |
+| Maithili | `Suresh` | `Meera` |
+| Malayalam | `Krishnan` | `Deepa` |
+| Manipuri | `Tomba` | `Ibemhal` |
+| Marathi | `Siddharth` | `Ananya` |
+| Nepali | `Bikash` | `Sapana` |
+| Odia | `Bijay` | `Sujata` |
+| Punjabi | `Gurpreet` | `Simran` |
+| Sanskrit | `Vedant` | `Gayatri` |
+| Santali | `Chandu` | `Roshni` |
+| Sindhi | `Amjad` | `Kavita` |
+| Tamil | `Murugan` | `Thangam` |
+| Telugu | `Vishnu` | `Lakshmi` |
+| Urdu | `Salman` | `Fatima` |
+
+**23 languages, 46 speakers** (1 male + 1 female per language).
+
+#### Expression Styles
+
+Control the emotional tone by passing a `style` tag in the text prefix (e.g. `"Rajesh: <Happy> Hello!"`).
+
+| Style Tag | Description |
+|-----------|-------------|
+| `<Happy>` | Joyful, upbeat tone |
+| `<Sad>` | Somber, melancholic tone |
+| `<Angry>` | Forceful, intense tone |
+| `<Fearful>` | Anxious, trembling tone |
+| `<Surprised>` | Exclamatory, astonished tone |
+| `<Disgust>` | Repulsed, disapproving tone |
+| `<News>` | Formal news-anchor style |
+| `<Conversational>` | Casual, everyday speech |
+| `<Narrative>` | Storytelling / audiobook style |
+| `<Enthusiastic>` | Energetic, passionate tone |
+| `<Neutral>` | Clean read-speech (default, no tag needed) |
+
+**Expression style examples:**
+
+```python
+# Happy greeting
+config = TTSConfig(model="zero-indic", voice="Rajesh")
+result = await client.tts.synthesize("Rajesh: <Happy> Welcome aboard! We're thrilled to have you.", config=config)
+
+# News anchor reading
+config = TTSConfig(model="zero-indic", voice="Nisha")
+result = await client.tts.synthesize("Nisha: <News> Breaking news: the markets rallied today.", config=config)
+
+# Storytelling
+config = TTSConfig(model="zero-indic", voice="Krishnan")
+result = await client.tts.synthesize("Krishnan: <Narrative> Once upon a time, in a land far away...", config=config)
+
+# Conversational chatbot
+config = TTSConfig(model="zero-indic", voice="Simran")
+result = await client.tts.synthesize("Simran: <Conversational> Hey! How's it going?", config=config)
+
+# Neutral (default — no tag needed)
+config = TTSConfig(model="zero-indic", voice="Varun")
+result = await client.tts.synthesize("Varun: Your account balance is five thousand rupees.", config=config)
+```
 
 #### Output Formats
 
@@ -209,38 +433,30 @@ Configuration for synthesis requests. Passed as `config=` to `synthesize()` and 
 **Batch (HTTP)**
 
 ```python
-# Async
 result = await client.tts.synthesize("text", config=TTSConfig(...))
 result.save("output.mp3")       # Save to file
 result.audio_data               # Raw bytes
 result.duration_seconds          # Audio duration
 result.sample_rate               # Sample rate (Hz)
 result.word_timestamps           # List[WordTimestamp] if requested
-
-# Sync
-result = client.tts.synthesize("text", config=TTSConfig(...))
 ```
 
 **Streaming (WebSocket)**
 
 ```python
-# Async — iterate audio chunks
+# Iterate audio chunks
 async for audio_bytes in await client.tts.stream("text", config=TTSConfig(...)):
     play(audio_bytes)
 
-# Async — with chunk metadata
+# With chunk metadata
 async for chunk_meta, audio_bytes in await client.tts.stream("text", config=TTSConfig(...), detailed=True):
     print(chunk_meta.chunk_index, len(audio_bytes))
 
-# Async — collect all and return combined bytes
+# Collect all and return combined bytes
 audio = await client.tts.synthesize_stream("text", config=TTSConfig(...))
 
-# Async — stream directly to file
+# Stream directly to file
 await client.tts.stream_to_file("text", "output.pcm", config=TTSConfig(...))
-
-# Sync
-for audio_bytes in client.tts.stream("text", config=TTSConfig(...)):
-    play(audio_bytes)
 ```
 
 #### `TTSResult`
@@ -270,10 +486,7 @@ Configuration for batch transcription. Passed as `config=` to `transcribe()`.
 | `language_code` | `str` | `"auto"` | Language code or `"auto"` for auto-detection. |
 | `task` | `str` | `"transcribe"` | Task type (`"transcribe"`). |
 | `output_script` | `str` | `"auto"` | Output script (`"auto"`, `"latin"`, `"native"`). |
-| `use_vad_chunking` | `bool` | `True` | Use VAD-based audio chunking. |
-| `chunk_size` | `int` | `30` | Audio chunk size in seconds. |
 | `enable_diarization` | `bool` | `False` | Enable speaker diarization. |
-| `enable_denoising` | `bool` | `False` | Enable audio denoising. |
 
 **NLP Features:**
 
@@ -293,13 +506,218 @@ Configuration for batch transcription. Passed as `config=` to `transcribe()`.
 | `enable_profanity_hashing` | `bool` | `False` | Hash profane words. |
 | `hash_keywords` | `list[str]` | `None` | Custom keywords to hash. |
 | `enable_keyterm_normalization` | `bool` | `False` | Normalize key terms. |
-| `enable_medical_correction` | `bool` | `False` | Apply medical term correction. |
 | `enable_translation` | `bool` | `False` | Translate transcript. |
 | `target_language` | `str` | `None` | Target language for translation. |
 | `enable_transliteration` | `bool` | `False` | Transliterate transcript. |
-| `enable_code_switch_correction` | `bool` | `False` | Fix code-switching artifacts. |
-| `enable_language_identification` | `bool` | `False` | Identify spoken language. |
 | `project` | `str` | `None` | Project name for tracking. |
+
+#### ASR Parameter Examples
+
+**`model` + `language_code` — Basic transcription**
+
+```python
+# Auto-detect language (default)
+config = TranscriptionConfig(model="zero-indic", language_code="auto")
+result = await client.asr.transcribe("audio.wav", config=config)
+print(result.text)
+print(f"Detected: {result.detected_language}")
+# Output:
+#   "Hello, how are you doing today?"
+#   Detected: en
+
+# Specify language for better accuracy
+config = TranscriptionConfig(model="zero-indic", language_code="hi")
+result = await client.asr.transcribe("hindi_audio.wav", config=config)
+print(result.text)
+# Output: "नमस्ते, आप कैसे हैं?"
+```
+
+**`output_script` — Control output script**
+
+Values: `"auto"`, `"latin"`, `"native"`
+
+```python
+# Native script (default for auto)
+config = TranscriptionConfig(model="zero-indic", language_code="hi", output_script="native")
+result = await client.asr.transcribe("hindi_audio.wav", config=config)
+print(result.text)
+# Output: "नमस्ते, आप कैसे हैं?"
+
+# Latin/Roman script — transliterated output
+config = TranscriptionConfig(model="zero-indic", language_code="hi", output_script="latin")
+result = await client.asr.transcribe("hindi_audio.wav", config=config)
+print(result.text)
+# Output: "namaste, aap kaise hain?"
+
+# Auto — server decides based on language
+config = TranscriptionConfig(model="zero-indic", output_script="auto")
+```
+
+**`enable_diarization` — Speaker identification**
+
+```python
+config = TranscriptionConfig(model="zero-indic", enable_diarization=True)
+result = await client.asr.transcribe("meeting.wav", config=config)
+for seg in result.segments:
+    print(f"  [{seg.start:.1f}s - {seg.end:.1f}s] {seg.text}")
+# Output:
+#   [0.0s - 3.2s] [Speaker 1] Good morning, let's begin the meeting.
+#   [3.5s - 6.8s] [Speaker 2] Sure, I have the report ready.
+#   [7.0s - 10.1s] [Speaker 1] Great, please go ahead.
+```
+
+**`enable_intent_detection` + `intent_choices` — Detect user intent**
+
+```python
+# Open intent detection
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_intent_detection=True,
+)
+result = await client.asr.transcribe("customer_call.wav", config=config)
+print(result.text)
+print(result.nlp_analysis.intent)
+# Output:
+#   "I want to cancel my subscription"
+#   {"intent": "cancellation", "confidence": 0.94}
+
+# Constrained intent — pick from specific choices
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_intent_detection=True,
+    intent_choices=["booking", "cancellation", "complaint", "inquiry"],
+)
+result = await client.asr.transcribe("customer_call.wav", config=config)
+print(result.nlp_analysis.intent)
+# Output: {"intent": "cancellation", "confidence": 0.97}
+```
+
+**`enable_summarization` + `summary_max_length` — Summarize transcript**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_summarization=True,
+    summary_max_length=100,  # max 100 characters
+)
+result = await client.asr.transcribe("meeting_recording.wav", config=config)
+print(f"Full transcript: {result.text[:80]}...")
+print(f"Summary: {result.nlp_analysis.summary}")
+# Output:
+#   Full transcript: Good morning everyone. Today we'll review Q3 results. Revenue grew by...
+#   Summary: Q3 review meeting covering revenue growth, cost optimization, and next quarter targets.
+```
+
+**`enable_sentiment_analysis` — Detect sentiment**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_sentiment_analysis=True,
+)
+result = await client.asr.transcribe("feedback.wav", config=config)
+print(result.text)
+print(result.nlp_analysis.sentiment)
+# Output:
+#   "The product is amazing, I absolutely love it!"
+#   {"label": "positive", "score": 0.96}
+```
+
+**`enable_emotion_diarization` — Detect emotions per segment**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_emotion_diarization=True,
+)
+result = await client.asr.transcribe("conversation.wav", config=config)
+print(result.nlp_analysis.emotion)
+# Output:
+#   {"segments": [
+#     {"start": 0.0, "end": 3.2, "emotion": "neutral", "text": "Hello, how can I help?"},
+#     {"start": 3.5, "end": 7.1, "emotion": "angry", "text": "I've been waiting for an hour!"},
+#     {"start": 7.4, "end": 10.0, "emotion": "empathetic", "text": "I'm sorry about that."}
+#   ]}
+```
+
+**`enable_profanity_hashing` + `hash_keywords` — Redact sensitive words**
+
+```python
+# Hash common profanity
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_profanity_hashing=True,
+)
+result = await client.asr.transcribe("audio.wav", config=config)
+print(result.text)
+# Output: "What the #### is going on?"
+
+# Hash custom keywords (e.g., names, account numbers)
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_profanity_hashing=True,
+    hash_keywords=["John", "Acme Corp", "Project Alpha"],
+)
+result = await client.asr.transcribe("meeting.wav", config=config)
+print(result.text)
+# Output: "#### from ######### said ############# is on track."
+```
+
+**`enable_translation` + `target_language` — Translate transcript**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    language_code="hi",
+    enable_translation=True,
+    target_language="en",
+)
+result = await client.asr.transcribe("hindi_audio.wav", config=config)
+print(f"Original: {result.text}")
+print(f"Translation: {result.nlp_analysis.translation}")
+# Output:
+#   Original: नमस्ते, आज मौसम बहुत अच्छा है।
+#   Translation: {"text": "Hello, the weather is very nice today.", "target_language": "en"}
+```
+
+**`enable_transliteration` — Transliterate to Latin script**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    language_code="hi",
+    enable_transliteration=True,
+)
+result = await client.asr.transcribe("hindi_audio.wav", config=config)
+print(f"Native: {result.text}")
+print(f"Transliterated: {result.nlp_analysis.transliteration}")
+# Output:
+#   Native: नमस्ते, आज मौसम बहुत अच्छा है।
+#   Transliterated: {"text": "namaste, aaj mausam bahut achha hai."}
+```
+
+**`enable_keyterm_normalization` — Normalize domain terms**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_keyterm_normalization=True,
+)
+result = await client.asr.transcribe("tech_audio.wav", config=config)
+print(result.text)
+# Output: "The API returns JSON over HTTPS." (normalized from "A P I", "jay son", "H T T P S")
+```
+
+**`project` — Tag requests for tracking**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    project="customer-support-q1",
+)
+result = await client.asr.transcribe("call.wav", config=config)
+# Request is tagged with project name for usage tracking and analytics
+```
 
 #### ASR Methods
 
@@ -334,6 +752,58 @@ Configuration for the WebSocket streaming session.
 | `dtype` | `str` | `"int16"` | Audio data type (`"int16"`, `"float32"`). |
 | `chunk_size_sec` | `float` | `1.0` | Processing chunk size in seconds. |
 | `silence_threshold_sec` | `float` | `0.5` | Silence duration to trigger segmentation. |
+
+#### Streaming Parameter Examples
+
+**`language` — Set recognition language**
+
+```python
+# Auto-detect (default)
+conn = await client.asr.stream(config=StreamingConfig(language="auto"))
+
+# Specific language for better accuracy
+conn = await client.asr.stream(config=StreamingConfig(language="en"))
+conn = await client.asr.stream(config=StreamingConfig(language="hi"))
+conn = await client.asr.stream(config=StreamingConfig(language="ta"))
+```
+
+**`sample_rate` + `dtype` — Match your audio source**
+
+```python
+# Standard microphone input: 16kHz, 16-bit integer (default)
+conn = await client.asr.stream(config=StreamingConfig(
+    sample_rate=16000,
+    dtype="int16",
+))
+
+# High-quality audio: 48kHz, 32-bit float
+conn = await client.asr.stream(config=StreamingConfig(
+    sample_rate=48000,
+    dtype="float32",
+))
+```
+
+**`chunk_size_sec` — Processing window size**
+
+```python
+# Smaller chunks = lower latency, more partial results
+conn = await client.asr.stream(config=StreamingConfig(chunk_size_sec=0.5))
+
+# Larger chunks = more context, potentially better accuracy
+conn = await client.asr.stream(config=StreamingConfig(chunk_size_sec=2.0))
+```
+
+**`silence_threshold_sec` — Control segment boundaries**
+
+```python
+# Quick segmentation — short pauses trigger a new segment
+conn = await client.asr.stream(config=StreamingConfig(silence_threshold_sec=0.3))
+# Good for: fast-paced dialogue, command recognition
+
+# Patient segmentation — only split on longer pauses
+conn = await client.asr.stream(config=StreamingConfig(silence_threshold_sec=1.5))
+# Good for: lectures, monologues, dictation
+```
 
 #### Streaming Events
 
@@ -395,17 +865,6 @@ Returned by `transcribe()`.
 | `audio_duration` | `float` | Audio duration in seconds. |
 | `inference_time_ms` | `float` | Server inference time in ms. |
 | `nlp_analysis` | `NLPAnalysis` | NLP results (if any `enable_*` flags were set). |
-
----
-
-### Endpoints Summary
-
-| Service | Mode | Endpoint | Protocol |
-|---------|------|----------|----------|
-| ASR | Batch | `POST /v1/audio/transcriptions` | HTTP |
-| ASR | Streaming | `/ws` | WebSocket |
-| TTS | Batch | `POST /` | HTTP |
-| TTS | Streaming | `/ws` | WebSocket |
 
 ---
 
