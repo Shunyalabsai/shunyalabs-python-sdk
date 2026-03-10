@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Optional
 
+from ._exceptions import ConfigurationError
+
 
 @dataclass
 class ClientConfig:
@@ -41,7 +43,7 @@ class ClientConfig:
     def resolve_api_key(self) -> str:
         key = self.api_key or os.environ.get("SHUNYALABS_API_KEY")
         if not key:
-            raise ValueError(
+            raise ConfigurationError(
                 "API key required: provide api_key or set SHUNYALABS_API_KEY environment variable"
             )
         return key

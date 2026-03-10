@@ -6,7 +6,7 @@ with the Shunyalabs TTS gateway.
 Public API
 ----------
 Models:
-    OutputFormat, TTSConfig, WordTimestamp, TTSResult, TTSChunk, TTSCompletion
+    OutputFormat, TTSConfig, TTSResult, TTSChunk, TTSCompletion
 
 Batch clients:
     AsyncBatchTTS, SyncBatchTTS
@@ -21,7 +21,6 @@ from ._models import (
     TTSCompletion,
     TTSConfig,
     TTSResult,
-    WordTimestamp,
 )
 from ._batch import AsyncBatchTTS, SyncBatchTTS
 from ._streaming import AsyncStreamingTTS, SyncStreamingTTS
@@ -30,7 +29,6 @@ __all__ = [
     # Models
     "OutputFormat",
     "TTSConfig",
-    "WordTimestamp",
     "TTSResult",
     "TTSChunk",
     "TTSCompletion",

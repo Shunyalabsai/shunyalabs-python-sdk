@@ -20,7 +20,10 @@ from typing import Any, BinaryIO, Dict, Optional, Union
 from shunyalabs._core._auth import StaticKeyAuth
 from shunyalabs._core._exceptions import (
     APIError,
+    AuthenticationError,
     ConfigurationError,
+    PermissionDeniedError,
+    RateLimitError,
     TranscriptionError,
 )
 from shunyalabs._core._http_transport import AsyncHttpTransport, SyncHttpTransport
@@ -160,8 +163,10 @@ class AsyncBatchASR:
         try:
             raw = await self._transport.post_form(_TRANSCRIPTIONS_PATH, form_data=form)
             return self._parse_response(raw)
-        except APIError:
-            raise
+        except APIError as exc:
+            if isinstance(exc, (AuthenticationError, PermissionDeniedError, RateLimitError)):
+                raise
+            raise TranscriptionError(str(exc)) from exc
         except Exception as exc:
             raise TranscriptionError(f"Batch transcription failed: {exc}") from exc
         finally:
@@ -200,8 +205,10 @@ class AsyncBatchASR:
         try:
             raw = await self._transport.post_form(_TRANSCRIPTIONS_PATH, form_data=form)
             return self._parse_response(raw)
-        except APIError:
-            raise
+        except APIError as exc:
+            if isinstance(exc, (AuthenticationError, PermissionDeniedError, RateLimitError)):
+                raise
+            raise TranscriptionError(str(exc)) from exc
         except Exception as exc:
             raise TranscriptionError(f"Batch transcription (URL) failed: {exc}") from exc
 
@@ -320,8 +327,10 @@ class SyncBatchASR:
                 _TRANSCRIPTIONS_PATH, data=form_fields, files=files,
             )
             return self._parse_response(raw)
-        except APIError:
-            raise
+        except APIError as exc:
+            if isinstance(exc, (AuthenticationError, PermissionDeniedError, RateLimitError)):
+                raise
+            raise TranscriptionError(str(exc)) from exc
         except Exception as exc:
             raise TranscriptionError(f"Batch transcription failed: {exc}") from exc
         finally:
@@ -356,8 +365,10 @@ class SyncBatchASR:
                 _TRANSCRIPTIONS_PATH, data=form_fields,
             )
             return self._parse_response(raw)
-        except APIError:
-            raise
+        except APIError as exc:
+            if isinstance(exc, (AuthenticationError, PermissionDeniedError, RateLimitError)):
+                raise
+            raise TranscriptionError(str(exc)) from exc
         except Exception as exc:
             raise TranscriptionError(f"Batch transcription (URL) failed: {exc}") from exc
 

@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from pydantic import BaseModel, Field
 
@@ -100,8 +100,8 @@ class NLPAnalysis(BaseModel):
     summary: Optional[str] = None
     sentiment: Optional[Dict[str, Any]] = None
     emotion: Optional[Dict[str, Any]] = None
-    translation: Optional[Dict[str, Any]] = None
-    transliteration: Optional[Dict[str, Any]] = None
+    translation: Optional[Union[str, Dict[str, Any]]] = None
+    transliteration: Optional[Union[str, Dict[str, Any]]] = None
     language_identification: Optional[Dict[str, Any]] = None
 
 
