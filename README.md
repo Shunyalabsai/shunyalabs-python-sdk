@@ -886,15 +886,6 @@ All exceptions inherit from `ShunyalabsError`.
 
 ---
 
-## Framework Plugins
-
-| Framework | Package | Install |
-|-----------|---------|---------|
-| [LiveKit Agents](plugins/livekit/) | `livekit-plugins-shunyalabs` | `pip install livekit-plugins-shunyalabs` |
-| [Pipecat](plugins/pipecat/) | `pipecat-shunyalabs` | `pip install pipecat-shunyalabs` |
-
----
-
 ## Development
 
 ```bash
