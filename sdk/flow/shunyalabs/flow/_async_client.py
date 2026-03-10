@@ -101,7 +101,7 @@ class AsyncClient(EventEmitter):
             Convenience shortcut when using static keys and *auth* is None.
         url
             Override the Flow WebSocket endpoint; defaults to environment
-            variable ``Shunyalabs_FLOW_URL`` or the public SaaS URL.
+            variable ``SHUNYALABS_FLOW_URL`` or the public SaaS URL.
         conn_config
             Advanced connection settings such as reconnect policy
             and HTTP proxy support.
@@ -123,7 +123,7 @@ class AsyncClient(EventEmitter):
             auth = StaticKeyAuth(api_key)
 
         self._auth = auth
-        self._url = url or os.getenv("Shunyalabs_FLOW_URL") or "wss://flow.api.Shunyalabs.com/v1/flow"
+        self._url = url or os.getenv("SHUNYALABS_FLOW_URL") or "wss://flow.api.Shunyalabs.com/v1/flow"
         self._conn_config = conn_config or ConnectionConfig()
         self._session = SessionInfo(request_id=str(uuid.uuid4()))
         self._transport = Transport(self._url, self._conn_config, self._auth, self._session.request_id)

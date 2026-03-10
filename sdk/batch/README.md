@@ -271,4 +271,4 @@ logging.basicConfig(
 The client supports the following environment variables:
 
 - `SHUNYALABS_API_KEY`: Your Shunyalabs API key
-- `Shunyalabs_BATCH_URL`: Custom API endpoint URL (optional)
+- `SHUNYALABS_BATCH_URL`: Custom API endpoint URL (optional)

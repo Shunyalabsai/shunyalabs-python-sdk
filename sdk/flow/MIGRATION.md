@@ -177,7 +177,7 @@ The new SDK supports environment variables for configuration:
 ```python
 # Set environment variables
 export SHUNYALABS_API_KEY=your-api-key
-export Shunyalabs_FLOW_URL=wss://flow.api.Shunyalabs.com/v1/flow
+export SHUNYALABS_FLOW_URL=wss://flow.api.Shunyalabs.com/v1/flow
 
 # Use without explicit configuration
 from shunyalabs.flow import AsyncClient
