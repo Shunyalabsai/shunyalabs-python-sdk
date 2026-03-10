@@ -116,6 +116,8 @@ class ShunyaClient:
     """Synchronous Shunyalabs client with fluent API.
 
     Args:
+        config: A pre-built :class:`ClientConfig`. When provided, all other
+            keyword arguments are ignored.
         api_key: API key. Falls back to SHUNYALABS_API_KEY env var.
         timeout: Default request timeout in seconds.
         max_retries: Number of retries for failed requests.
@@ -136,6 +138,7 @@ class ShunyaClient:
     def __init__(
         self,
         *,
+        config: Optional[ClientConfig] = None,
         api_key: Optional[str] = None,
         timeout: float = 60.0,
         max_retries: int = 2,
@@ -144,7 +147,7 @@ class ShunyaClient:
         tts_ws_url: Optional[str] = None,
         flow_url: Optional[str] = None,
     ) -> None:
-        self._config = ClientConfig(
+        self._config = config or ClientConfig(
             api_key=api_key,
             timeout=timeout,
             max_retries=max_retries,
@@ -332,6 +335,8 @@ class AsyncShunyaClient:
     All methods are awaitable. Use as an async context manager for automatic cleanup.
 
     Args:
+        config: A pre-built :class:`ClientConfig`. When provided, all other
+            keyword arguments are ignored.
         api_key: API key. Falls back to SHUNYALABS_API_KEY env var.
         timeout: Default request timeout in seconds.
         max_retries: Number of retries for failed requests.
@@ -353,6 +358,7 @@ class AsyncShunyaClient:
     def __init__(
         self,
         *,
+        config: Optional[ClientConfig] = None,
         api_key: Optional[str] = None,
         timeout: float = 60.0,
         max_retries: int = 2,
@@ -362,7 +368,7 @@ class AsyncShunyaClient:
         tts_ws_url: Optional[str] = None,
         flow_url: Optional[str] = None,
     ) -> None:
-        self._config = ClientConfig(
+        self._config = config or ClientConfig(
             api_key=api_key,
             timeout=timeout,
             max_retries=max_retries,

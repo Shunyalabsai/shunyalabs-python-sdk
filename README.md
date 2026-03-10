@@ -185,7 +185,6 @@ Configuration for synthesis requests. Passed as `config=` to `synthesize()` and 
 | `speed` | `float` | `1.0` | Speaking speed multiplier (0.25–4.0). |
 | `trim_silence` | `bool` | `False` | Trim leading/trailing silence from audio. |
 | `volume_normalization` | `str` | `None` | `"peak"` or `"loudness"`. |
-| `word_timestamps` | `bool` | `False` | Return word-level timestamps (batch only). |
 | `background_audio` | `str` | `None` | Preset name or base64-encoded background audio. |
 | `background_volume` | `float` | `0.1` | Background volume relative to speech (0.0–1.0). |
 
@@ -295,23 +294,6 @@ result = await client.tts.synthesize("This audio will have consistent peak level
 # Loudness normalization — perceptually even loudness (EBU R128)
 config = TTSConfig(model="zero-indic", voice="Rajesh", volume_normalization="loudness")
 result = await client.tts.synthesize("This audio will sound equally loud regardless of content.", config=config)
-```
-
-**`word_timestamps` — Get timing for each word (batch only)**
-
-```python
-config = TTSConfig(model="zero-indic", voice="Varun", word_timestamps=True)
-result = await client.tts.synthesize("Hello world, how are you?", config=config)
-
-for wt in result.word_timestamps:
-    print(f"  '{wt.word}' — {wt.start:.2f}s to {wt.end:.2f}s")
-
-# Output:
-#   'Hello' — 0.00s to 0.32s
-#   'world,' — 0.32s to 0.68s
-#   'how' — 0.72s to 0.88s
-#   'are' — 0.88s to 1.02s
-#   'you?' — 1.02s to 1.28s
 ```
 
 **`background_audio` + `background_volume` — Add background music**
@@ -436,9 +418,7 @@ result = await client.tts.synthesize("Varun: Your account balance is five thousa
 result = await client.tts.synthesize("text", config=TTSConfig(...))
 result.save("output.mp3")       # Save to file
 result.audio_data               # Raw bytes
-result.duration_seconds          # Audio duration
 result.sample_rate               # Sample rate (Hz)
-result.word_timestamps           # List[WordTimestamp] if requested
 ```
 
 **Streaming (WebSocket)**
@@ -465,12 +445,9 @@ Returned by `synthesize()`.
 
 | Attribute | Type | Description |
 |-----------|------|-------------|
-| `request_id` | `str` | Unique request identifier. |
 | `audio_data` | `bytes` | Decoded audio bytes. |
 | `sample_rate` | `int` | Audio sample rate in Hz. |
-| `duration_seconds` | `float` | Total audio duration. |
 | `format` | `str` | Audio format string. |
-| `word_timestamps` | `list[WordTimestamp]` | Word-level timestamps (if requested). |
 
 ---
 
@@ -523,7 +500,7 @@ print(result.text)
 print(f"Detected: {result.detected_language}")
 # Output:
 #   "Hello, how are you doing today?"
-#   Detected: en
+#   Detected: English
 
 # Specify language for better accuracy
 config = TranscriptionConfig(model="zero-indic", language_code="hi")
@@ -579,7 +556,7 @@ print(result.text)
 print(result.nlp_analysis.intent)
 # Output:
 #   "I want to cancel my subscription"
-#   {"intent": "cancellation", "confidence": 0.94}
+#   {"label": "cancellation", "confidence": 0.94}
 
 # Constrained intent — pick from specific choices
 config = TranscriptionConfig(
@@ -589,7 +566,7 @@ config = TranscriptionConfig(
 )
 result = await client.asr.transcribe("customer_call.wav", config=config)
 print(result.nlp_analysis.intent)
-# Output: {"intent": "cancellation", "confidence": 0.97}
+# Output: {"label": "cancellation", "confidence": 0.97}
 ```
 
 **`enable_summarization` + `summary_max_length` — Summarize transcript**
@@ -620,7 +597,7 @@ print(result.text)
 print(result.nlp_analysis.sentiment)
 # Output:
 #   "The product is amazing, I absolutely love it!"
-#   {"label": "positive", "score": 0.96}
+#   {"label": "positive", "score": {"positive": 0.96, "negative": 0.02, "neutral": 0.02}}
 ```
 
 **`enable_emotion_diarization` — Detect emotions per segment**
@@ -677,7 +654,7 @@ print(f"Original: {result.text}")
 print(f"Translation: {result.nlp_analysis.translation}")
 # Output:
 #   Original: नमस्ते, आज मौसम बहुत अच्छा है।
-#   Translation: {"text": "Hello, the weather is very nice today.", "target_language": "en"}
+#   Translation: Hello, the weather is very nice today.
 ```
 
 **`enable_transliteration` — Transliterate to Latin script**
@@ -693,7 +670,7 @@ print(f"Native: {result.text}")
 print(f"Transliterated: {result.nlp_analysis.transliteration}")
 # Output:
 #   Native: नमस्ते, आज मौसम बहुत अच्छा है।
-#   Transliterated: {"text": "namaste, aaj mausam bahut achha hai."}
+#   Transliterated: namaste, aaj mausam bahut achha hai.
 ```
 
 **`enable_keyterm_normalization` — Normalize domain terms**
@@ -861,7 +838,7 @@ Returned by `transcribe()`.
 | `request_id` | `str` | Unique request identifier. |
 | `text` | `str` | Full transcription text. |
 | `segments` | `list[SegmentResult]` | Time-aligned segments (`start`, `end`, `text`). |
-| `detected_language` | `str` | Detected language code. |
+| `detected_language` | `str` | Detected language name (e.g. `"English"`, `"Hindi"`, `"Kannada"`). |
 | `audio_duration` | `float` | Audio duration in seconds. |
 | `inference_time_ms` | `float` | Server inference time in ms. |
 | `nlp_analysis` | `NLPAnalysis` | NLP results (if any `enable_*` flags were set). |
