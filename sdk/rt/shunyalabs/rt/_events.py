@@ -103,7 +103,7 @@ class EventEmitter:
             total_handlers = len(self._handlers.get(event, set())) + len(self._once_handlers.get(event, set()))
             if total_handlers > 0:
                 self._logger.debug("📤 EventEmitter: Calling %d handler(s) for %s", total_handlers, event)
-        
+
         # Call persistent handlers
         for callback in self._handlers.get(event, set()).copy():
             try:

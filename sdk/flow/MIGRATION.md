@@ -14,7 +14,7 @@ This guide helps users migrate from the legacy Shunyalabs Flow Client (`shunyala
 
 ### Breaking Changes
 
-- **Import paths**: `Shunyalabs_flow.client` → `shunyalabs.flow`
+- **Import paths**: `shunyalabs_flow.client` → `shunyalabs.flow`
 - **Client class**: `WebsocketClient` → `AsyncClient`
 - **Method names**: `.run()` → `.start_conversation()` for conversation operations
 - **Event registration**: `.add_event_handler()` → `.on()`
@@ -45,7 +45,7 @@ from shunyalabs_flow.models import (
 
 client = WebsocketClient(
     ConnectionSettings(
-        url="wss://flow.api.Shunyalabs.com/v1/flow",
+        url="wss://flow.api.shunyalabs.com/v1/flow",
         auth_token="API-KEY",
     )
 )
@@ -87,7 +87,7 @@ from shunyalabs_flow.models import (
 
 client = WebsocketClient(
     ConnectionSettings(
-        url="wss://flow.api.Shunyalabs.com/v1/flow",
+        url="wss://flow.api.shunyalabs.com/v1/flow",
         auth_token="API-KEY",
     )
 )
@@ -150,7 +150,7 @@ from shunyalabs_flow.models import ConnectionSettings
 # JWT generation was handled manually or through external libraries
 client = WebsocketClient(
     ConnectionSettings(
-        url="wss://flow.api.Shunyalabs.com/v1/flow",
+        url="wss://flow.api.shunyalabs.com/v1/flow",
         auth_token="API-KEY",
         generate_temp_token=True,
     )
@@ -177,7 +177,7 @@ The new SDK supports environment variables for configuration:
 ```python
 # Set environment variables
 export SHUNYALABS_API_KEY=your-api-key
-export Shunyalabs_FLOW_URL=wss://flow.api.Shunyalabs.com/v1/flow
+export SHUNYALABS_FLOW_URL=wss://flow.api.shunyalabs.com/v1/flow
 
 # Use without explicit configuration
 from shunyalabs.flow import AsyncClient

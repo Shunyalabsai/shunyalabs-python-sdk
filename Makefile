@@ -54,13 +54,16 @@ help:
 test-all: test-rt test-batch test-flow test-tts
 
 test-rt:
-	pytest tests/rt/ -v
+	pytest tests/asr/ -v
 
 test-batch:
-	pytest tests/batch/ -v
+	pytest tests/core/ -v
 
 test-flow:
 	pytest tests/flow/ -v
+
+test-tts:
+	pytest tests/tts/ -v
 
 # Formatting targets
 format-all: format-rt format-batch format-flow format-tts

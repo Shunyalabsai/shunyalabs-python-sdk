@@ -236,7 +236,7 @@ from shunyalabs.batch import AsyncClient, ConnectionConfig
 async def main():
     # Custom connection settings
     config = ConnectionConfig(
-        url="https://asr.api.Shunyalabs.com/v2",
+        url="https://asr.api.shunyalabs.com/v2",
         api_key="your-api-key",
         connect_timeout=30.0,
         operation_timeout=600.0
@@ -271,4 +271,4 @@ logging.basicConfig(
 The client supports the following environment variables:
 
 - `SHUNYALABS_API_KEY`: Your Shunyalabs API key
-- `Shunyalabs_BATCH_URL`: Custom API endpoint URL (optional)
+- `SHUNYALABS_BATCH_URL`: Custom API endpoint URL (optional)
