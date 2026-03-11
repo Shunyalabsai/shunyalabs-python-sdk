@@ -4,7 +4,7 @@ import base64
 from typing import Any
 
 try:
-    import numpy as np
+    import numpy as np  # type: ignore[import-not-found]
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -161,4 +161,4 @@ def convert_to_pcm_f32le(
     float_samples = np.clip(float_samples, -1.0, 1.0)
 
     # Convert back to bytes (PCM_F32LE)
-    return float_samples.astype(np.float32, copy=False).tobytes()
+    return bytes(float_samples.astype(np.float32, copy=False).tobytes())
