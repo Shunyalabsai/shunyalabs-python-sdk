@@ -47,7 +47,7 @@ dev = [
 
 [project.urls]
 homepage = "https://github.com/shunyalabs/shunyalabs-python-sdk"
-documentation = "https://docs.shunyalabs.com/"
+documentation = "https://docs.shunyalabs.ai/"
 repository = "https://github.com/shunyalabs/shunyalabs-python-sdk"
 issues = "https://github.com/shunyalabs/shunyalabs-python-sdk/issues"
 
