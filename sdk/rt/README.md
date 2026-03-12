@@ -100,7 +100,7 @@ async with AsyncClient(auth=auth) as client:
 ```
 
 Ideal for browser applications or when minimizing API key exposure.
-See the [authentication documentation](https://docs.shunyalabs.com/introduction/authentication) for more details.
+See the [authentication documentation](https://docs.shunyalabs.ai/introduction/authentication) for more details.
 
 ## Logging
 

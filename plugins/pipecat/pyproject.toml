@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "pipecat-shunyalabs"
 version = "0.1.0"
 description = "Shunyalabs ASR & TTS services for Pipecat"
-authors = [{ name = "Shunyalabs", email = "support@shunyalabs.com" }]
+authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
 license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = [

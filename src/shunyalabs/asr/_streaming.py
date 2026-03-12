@@ -235,7 +235,7 @@ class AsyncStreamingASR:
 
     Args:
         auth: A :class:`StaticKeyAuth` instance.
-        ws_url: The full WebSocket URL (e.g. ``wss://asr.api.shunyalabs.com/ws``).
+        ws_url: The full WebSocket URL (e.g. ``wss://asr.api.shunyalabs.ai/ws``).
         ws_config: Optional WebSocket connection settings (timeouts, ping, etc.).
     """
 

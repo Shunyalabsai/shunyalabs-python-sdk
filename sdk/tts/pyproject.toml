@@ -7,7 +7,7 @@ name = "shunyalabs-tts"
 dynamic = ["version"]
 description = "Shunyalabs TTS API Client"
 readme = "README.md"
-authors = [{ name = "Shunyalabs", email = "support@shunyalabs.com" }]
+authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
 license = "MIT"
 requires-python = ">=3.9"
 dependencies = ["aiohttp", "aiofiles"]
@@ -41,7 +41,7 @@ dev = [
 
 [project.urls]
 homepage = "https://github.com/shunyalabs/shunyalabs-python-sdk"
-documentation = "https://docs.shunyalabs.com/"
+documentation = "https://docs.shunyalabs.ai/"
 repository = "https://github.com/shunyalabs/shunyalabs-python-sdk"
 issues = "https://github.com/shunyalabs/shunyalabs-python-sdk/issues"
 

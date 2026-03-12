@@ -90,7 +90,7 @@ class AsyncFlowClient(EventEmitter):
         else:
             self._auth = StaticKeyAuth(api_key)
 
-        self._url = url or os.getenv("SHUNYALABS_FLOW_URL") or "wss://flow.api.shunyalabs.com/v1/flow"
+        self._url = url or os.getenv("SHUNYALABS_FLOW_URL") or "wss://flow.api.shunyalabs.ai/v1/flow"
         self._conn_config = conn_config or WsConnectionConfig()
         self._session = SessionInfo(request_id=str(uuid.uuid4()))
         self._transport = WsTransport(
