@@ -7,7 +7,7 @@ name = "shunyalabs-rt"
 dynamic = ["version"]
 description = "Shunyalabs Real-Time API Client"
 readme = "README.md"
-authors = [{ name = "Shunyalabs", email = "support@shunyalabs.com" }]
+authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
 license = "MIT"
 requires-python = ">=3.9"
 dependencies = ["websockets>=10.0"]

@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 from enum import Enum
 from pathlib import Path
-from typing import List, Literal, Optional
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -55,7 +55,6 @@ class TTSConfig(BaseModel):
         language: ISO 639-1/639-2 language code (2--3 chars).
         trim_silence: Strip leading/trailing silence from audio.
         volume_normalization: ``"peak"`` or ``"loudness"``, or *None*.
-        word_timestamps: Request word-level timestamps (batch only).
         background_audio: Preset name or base64-encoded background audio.
         background_volume: Background volume relative to speech (0.0--1.0).
         max_tokens: Maximum tokens for LLM generation (1--8192).
@@ -94,10 +93,6 @@ class TTSConfig(BaseModel):
     volume_normalization: Optional[str] = Field(
         None,
         description="Volume normalization mode: 'peak' or 'loudness'.",
-    )
-    word_timestamps: Optional[bool] = Field(
-        False,
-        description="Return word-level timestamps (batch only).",
     )
     background_audio: Optional[str] = Field(
         None,
@@ -164,20 +159,6 @@ class TTSConfig(BaseModel):
 # Response models
 # ---------------------------------------------------------------------------
 
-class WordTimestamp(BaseModel):
-    """A single word-level timestamp entry.
-
-    Attributes:
-        word: The word text.
-        start: Start time in seconds.
-        end: End time in seconds.
-    """
-
-    word: str
-    start: float
-    end: float
-
-
 class TTSResult(BaseModel):
     """Result of a batch TTS synthesis (``POST /tts``).
 
@@ -190,7 +171,6 @@ class TTSResult(BaseModel):
         sample_rate: Audio sample rate in Hz.
         duration_seconds: Total audio duration in seconds.
         format: Audio format string (e.g. ``"pcm"``).
-        word_timestamps: Optional list of word-level timestamps.
     """
 
     request_id: str
@@ -198,7 +178,6 @@ class TTSResult(BaseModel):
     sample_rate: int = 16000
     duration_seconds: float
     format: str = "pcm"
-    word_timestamps: Optional[List[WordTimestamp]] = None
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -262,20 +241,12 @@ class TTSResult(BaseModel):
         audio_b64: str = data.get("audio_data", "")
         audio_bytes = base64.b64decode(audio_b64) if audio_b64 else b""
 
-        timestamps_raw = data.get("word_timestamps")
-        timestamps = (
-            [WordTimestamp(**wt) for wt in timestamps_raw]
-            if timestamps_raw
-            else None
-        )
-
         return cls(
             request_id=data["request_id"],
             audio_data=audio_bytes,
             sample_rate=data.get("sample_rate", 16000),
             duration_seconds=data.get("duration_seconds", 0.0),
             format=data.get("format", "pcm"),
-            word_timestamps=timestamps,
         )
 
 
@@ -333,7 +304,6 @@ class TTSCompletion(BaseModel):
 __all__ = [
     "OutputFormat",
     "TTSConfig",
-    "WordTimestamp",
     "TTSResult",
     "TTSChunk",
     "TTSCompletion",

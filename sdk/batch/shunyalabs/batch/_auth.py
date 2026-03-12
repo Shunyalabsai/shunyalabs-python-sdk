@@ -13,7 +13,7 @@ class AuthBase(abc.ABC):
     Abstract base class for authentication methods.
     """
 
-    BASE_URL = "https://mp.shunyalabs.com"
+    BASE_URL = "https://mp.shunyalabs.ai"
 
     @abc.abstractmethod
     async def get_auth_headers(self) -> dict[str, str]:

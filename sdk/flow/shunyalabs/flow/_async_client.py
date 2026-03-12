@@ -123,7 +123,7 @@ class AsyncClient(EventEmitter):
             auth = StaticKeyAuth(api_key)
 
         self._auth = auth
-        self._url = url or os.getenv("SHUNYALABS_FLOW_URL") or "wss://flow.api.shunyalabs.com/v1/flow"
+        self._url = url or os.getenv("SHUNYALABS_FLOW_URL") or "wss://flow.api.Shunyalabs.com/v1/flow"
         self._conn_config = conn_config or ConnectionConfig()
         self._session = SessionInfo(request_id=str(uuid.uuid4()))
         self._transport = Transport(self._url, self._conn_config, self._auth, self._session.request_id)

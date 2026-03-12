@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 from shunyalabs._core._auth import StaticKeyAuth
-from shunyalabs._core._exceptions import SynthesisError
+from shunyalabs._core._exceptions import APIError, SynthesisError
 from shunyalabs._core._http_transport import AsyncHttpTransport, SyncHttpTransport
 from shunyalabs._core._logging import get_logger
 
@@ -91,6 +91,8 @@ class AsyncBatchTTS:
 
         try:
             audio_bytes = await self._transport.post_json_raw(_TTS_PATH, json_data=payload)
+        except APIError:
+            raise
         except Exception as exc:
             raise SynthesisError(f"Batch synthesis request failed: {exc}") from exc
 
@@ -145,6 +147,8 @@ class SyncBatchTTS:
 
         try:
             audio_bytes = self._transport.post_json_raw(_TTS_PATH, json_data=payload)
+        except APIError:
+            raise
         except Exception as exc:
             raise SynthesisError(f"Batch synthesis request failed: {exc}") from exc
 

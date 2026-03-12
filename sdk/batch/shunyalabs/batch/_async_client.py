@@ -98,7 +98,7 @@ class AsyncClient:
             ConfigurationError: If auth is None and API key is not provided/found.
         """
         self._auth = auth or StaticKeyAuth(api_key)
-        self._url = url or os.environ.get("SHUNYALABS_BATCH_URL") or "https://asr.api.shunyalabs.com/v2"
+        self._url = url or os.environ.get("SHUNYALABS_BATCH_URL") or "https://asr.api.Shunyalabs.com/v2"
         self._conn_config = conn_config or ConnectionConfig()
         self._request_id = str(uuid.uuid4())
         self._transport = Transport(self._url, self._conn_config, self._auth, self._request_id)

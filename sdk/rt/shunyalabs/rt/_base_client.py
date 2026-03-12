@@ -117,7 +117,7 @@ class _BaseClient(EventEmitter):
             Configured Transport instance
         """
         auth = auth or StaticKeyAuth(api_key)
-        url = url or os.getenv("SHUNYALABS_RT_URL") or "wss://eu2.rt.shunyalabs.com/v2"
+        url = url or os.getenv("SHUNYALABS_RT_URL") or "wss://eu2.rt.shunyalabs.ai/v2"
         conn_config = conn_config or ConnectionConfig()
         request_id = request_id or str(uuid.uuid4())
 
