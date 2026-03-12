@@ -84,7 +84,15 @@ class AsyncHttpTransport:
         for attempt in range(self._max_retries + 1):
             try:
                 async with session.post(url, json=json_data, headers=req_headers) as resp:
-                    body = await resp.json(content_type=None)
+                    try:
+                        body = await resp.json(content_type=None)
+                    except (json.JSONDecodeError, ValueError):
+                        text = await resp.text()
+                        if resp.status >= 400:
+                            raise TransportError(
+                                f"HTTP {resp.status}: {text[:200]}"
+                            )
+                        body = {"raw": text}
                     if resp.status >= 400:
                         if should_retry(resp.status) and attempt < self._max_retries:
                             last_exception = TransportError(f"HTTP {resp.status}")
@@ -162,7 +170,15 @@ class AsyncHttpTransport:
         for attempt in range(self._max_retries + 1):
             try:
                 async with session.post(url, data=form_data, headers=req_headers) as resp:
-                    body = await resp.json(content_type=None)
+                    try:
+                        body = await resp.json(content_type=None)
+                    except (json.JSONDecodeError, ValueError):
+                        text = await resp.text()
+                        if resp.status >= 400:
+                            raise TransportError(
+                                f"HTTP {resp.status}: {text[:200]}"
+                            )
+                        body = {"raw": text}
                     if resp.status >= 400:
                         if should_retry(resp.status) and attempt < self._max_retries:
                             last_exception = TransportError(f"HTTP {resp.status}")
@@ -249,7 +265,14 @@ class SyncHttpTransport:
         for attempt in range(self._max_retries + 1):
             try:
                 resp = client.post(url, json=json_data, headers=req_headers)
-                body = resp.json()
+                try:
+                    body = resp.json()
+                except (json.JSONDecodeError, ValueError):
+                    if resp.status_code >= 400:
+                        raise TransportError(
+                            f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        )
+                    body = {"raw": resp.text}
                 if resp.status_code >= 400:
                     if should_retry(resp.status_code) and attempt < self._max_retries:
                         last_exception = TransportError(f"HTTP {resp.status_code}")
@@ -328,7 +351,14 @@ class SyncHttpTransport:
         for attempt in range(self._max_retries + 1):
             try:
                 resp = client.post(url, data=data, files=files, headers=req_headers)
-                body = resp.json()
+                try:
+                    body = resp.json()
+                except (json.JSONDecodeError, ValueError):
+                    if resp.status_code >= 400:
+                        raise TransportError(
+                            f"HTTP {resp.status_code}: {resp.text[:200]}"
+                        )
+                    body = {"raw": resp.text}
                 if resp.status_code >= 400:
                     if should_retry(resp.status_code) and attempt < self._max_retries:
                         last_exception = TransportError(f"HTTP {resp.status_code}")

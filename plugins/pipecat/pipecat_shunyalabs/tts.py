@@ -56,7 +56,7 @@ class ShunyalabsTTSService(TTSService):
         url: WebSocket endpoint URL.
         model: TTS model name (e.g. ``"zero-indic"``).
         voice: Speaker voice name (e.g. ``"Rajesh"``, ``"Varun"``).
-        speaker: Speaker name prefix for text formatting (e.g. ``"Rajesh"``).
+        speaker: Speaker name (e.g. ``"Rajesh"``). Used for voice selection via ``TTSConfig``.
         style: Emotion style tag (e.g. ``"<Happy>"``).
         language: Language code for transliteration (e.g. ``"en"``, ``"hi"``).
         output_format: Audio format (default ``"pcm"``).
@@ -97,7 +97,7 @@ class ShunyalabsTTSService(TTSService):
         self._auth = StaticKeyAuth(self._api_key)
 
     def _format_text(self, text: str) -> str:
-        return f"{self._speaker}: {self._style} {text}"
+        return f"{self._style} {text}"
 
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""

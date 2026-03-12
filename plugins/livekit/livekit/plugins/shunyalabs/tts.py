@@ -60,7 +60,7 @@ class TTS(tts.TTS):
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
         ws_url: WebSocket streaming endpoint URL.
-        speaker: Speaker name prefix (e.g. ``"Rajesh"``). Prepended to text as ``"Speaker: text"``.
+        speaker: Speaker name (e.g. ``"Rajesh"``). Used for voice selection via ``TTSConfig``.
         style: Emotion style tag (e.g. ``"<Happy>"``). Inserted between speaker and text.
         language: Language code for transliteration (e.g. ``"en"``, ``"hi"``).
         sample_rate: Output sample rate (default 16000).
@@ -113,8 +113,8 @@ class TTS(tts.TTS):
         return "shunyalabs"
 
     def _format_text(self, text: str) -> str:
-        """Format text with speaker prefix and style tag."""
-        return f"{self._speaker}: {self._style} {text}"
+        """Format text with style tag."""
+        return f"{self._style} {text}"
 
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""

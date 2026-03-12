@@ -133,12 +133,12 @@ Streaming text-to-speech over WebSocket. Each synthesis request opens a connecti
 
 ### Text Formatting
 
-The service automatically formats text as `"Speaker: <Style> text"` before sending to the API:
+The service automatically formats text as `"<Style> text"` before sending to the API:
 
 ```python
 tts = ShunyalabsTTSService(speaker="Rajesh", style="<Happy>")
 # Input: "Welcome!"
-# Sent:  "Rajesh: <Happy> Welcome!"
+# Sent:  "<Happy> Welcome!"
 ```
 
 ### Frame Output

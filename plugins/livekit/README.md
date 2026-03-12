@@ -142,12 +142,12 @@ print(event.alternatives[0].text)
 
 ### Text Formatting
 
-The plugin automatically formats text as `"Speaker: <Style> text"` before sending to the API. For example:
+The plugin automatically formats text as `"<Style> text"` before sending to the API. For example:
 
 ```python
 tts = shunyalabs.TTS(speaker="Rajesh", style="<Happy>")
 # Input: "Welcome to our platform"
-# Sent:  "Rajesh: <Happy> Welcome to our platform"
+# Sent:  "<Happy> Welcome to our platform"
 ```
 
 ### Streaming TTS

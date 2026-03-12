@@ -358,7 +358,7 @@ Each speaker has a native language listed below, but **every speaker can speak i
 
 #### Expression Styles
 
-Control the emotional tone by passing a `style` tag in the text prefix (e.g. `"Rajesh: <Happy> Hello!"`).
+Control the emotional tone by passing a style tag before the text (e.g. `"<Happy> Hello!"`).
 
 | Style Tag | Description |
 |-----------|-------------|
@@ -379,23 +379,23 @@ Control the emotional tone by passing a `style` tag in the text prefix (e.g. `"R
 ```python
 # Happy greeting
 config = TTSConfig(model="zero-indic", voice="Rajesh")
-result = await client.tts.synthesize("Rajesh: <Happy> Welcome aboard! We're thrilled to have you.", config=config)
+result = await client.tts.synthesize("<Happy> Welcome aboard! We're thrilled to have you.", config=config)
 
 # News anchor reading
 config = TTSConfig(model="zero-indic", voice="Nisha")
-result = await client.tts.synthesize("Nisha: <News> Breaking news: the markets rallied today.", config=config)
+result = await client.tts.synthesize("<News> Breaking news: the markets rallied today.", config=config)
 
 # Storytelling
 config = TTSConfig(model="zero-indic", voice="Krishnan")
-result = await client.tts.synthesize("Krishnan: <Narrative> Once upon a time, in a land far away...", config=config)
+result = await client.tts.synthesize("<Narrative> Once upon a time, in a land far away...", config=config)
 
 # Conversational chatbot
 config = TTSConfig(model="zero-indic", voice="Simran")
-result = await client.tts.synthesize("Simran: <Conversational> Hey! How's it going?", config=config)
+result = await client.tts.synthesize("<Conversational> Hey! How's it going?", config=config)
 
 # Neutral (default — no tag needed)
 config = TTSConfig(model="zero-indic", voice="Varun")
-result = await client.tts.synthesize("Varun: Your account balance is five thousand rupees.", config=config)
+result = await client.tts.synthesize("Your account balance is five thousand rupees.", config=config)
 ```
 
 #### Output Formats
