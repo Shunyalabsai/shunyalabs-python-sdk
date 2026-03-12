@@ -75,7 +75,7 @@ class AsyncClient(_BaseClient):
         conn_config: Optional[ConnectionConfig] = None,
     ) -> None:
         self._logger = get_logger("shunyalabs.rt.async_client")
-        self._logger.info("AsyncClient.__init__ called (api_key=%s, url=%s)", 
+        self._logger.info("AsyncClient.__init__ called (api_key=%s, url=%s)",
                          "***" if api_key else None, url)
 
         (
@@ -166,7 +166,7 @@ class AsyncClient(_BaseClient):
             raise
 
     async def stop_session(self) -> None:
-        self._logger.info("AsyncClient.stop_session called (seq_no=%s, session_id=%s)", 
+        self._logger.info("AsyncClient.stop_session called (seq_no=%s, session_id=%s)",
                          self._seq_no, self._session_id)
         """
         This method closes the WebSocket connection and ends the transcription session.
@@ -338,19 +338,19 @@ class AsyncClient(_BaseClient):
                     # Pass session_id and sample_rate for API Gateway format
                     chunk_size = len(frame)
                     audio_duration_ms = (chunk_size / 4 / self._sample_rate * 1000) if chunk_size > 0 else 0
-                    
+
                     self._logger.debug(
                         "AsyncClient._audio_producer: sending chunk %d, size=%d bytes, duration=%.2f ms, sample_rate=%d Hz",
                         chunk_count + 1, chunk_size, audio_duration_ms, self._sample_rate
                     )
-                    
+
                     await self.send_audio(
                         frame,
                         session_id=self._session_id,
                         sample_rate=self._sample_rate
                     )
                     chunk_count += 1
-                    
+
                     if chunk_count % 10 == 0:
                         total_audio_ms = (chunk_count * chunk_size / 4 / self._sample_rate * 1000) if chunk_size > 0 else 0
                         self._logger.info(
@@ -386,7 +386,7 @@ class AsyncClient(_BaseClient):
                     # API Gateway format - match test_apigw_ws_send_passthrough.py
                     # Just send END message (no END_OF_AUDIO frame needed)
                     effective_session_id = session_id or self._session_id or (self._session.request_id if hasattr(self._session, 'request_id') else 'default')
-                    
+
                     end_msg = {
                         "type": "end",
                         "session_id": effective_session_id,
@@ -404,7 +404,7 @@ class AsyncClient(_BaseClient):
                 self._logger.error("Failed to send EndOfStream message: %s", e)
                 raise
         else:
-            self._logger.info("AsyncClient._send_eos: skipping (eos_sent=%s, session_done=%s)", 
+            self._logger.info("AsyncClient._send_eos: skipping (eos_sent=%s, session_done=%s)",
                              self._eos_sent, self._session_done_evt.is_set())
 
     async def _wait_recognition_started(self, timeout: float = 5.0) -> None:

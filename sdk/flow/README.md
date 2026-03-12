@@ -45,7 +45,7 @@ See the [authentication documentation](https://docs.Shunyalabs.com/introduction/
 The client supports the following environment variables:
 
 - `SHUNYALABS_API_KEY`: Your Shunyalabs API key
-- `Shunyalabs_FLOW_URL`: Custom API endpoint URL (optional)
+- `SHUNYALABS_FLOW_URL`: Custom API endpoint URL (optional)
 
 ## Logging
 

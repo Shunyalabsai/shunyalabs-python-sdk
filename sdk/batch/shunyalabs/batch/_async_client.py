@@ -52,7 +52,7 @@ class AsyncClient:
         auth: Authentication instance. If not provided, uses StaticKeyAuth
               with api_key parameter or SHUNYALABS_API_KEY environment variable.
         api_key: Shunyalabs API key (used only if auth not provided).
-        url: REST API endpoint URL. If not provided, uses Shunyalabs_BATCH_URL
+        url: REST API endpoint URL. If not provided, uses SHUNYALABS_BATCH_URL
              environment variable or defaults to production endpoint.
         conn_config: Complete connection configuration object. If provided, overrides
                other parameters.
@@ -90,7 +90,7 @@ class AsyncClient:
             auth: Authentication method, it can be StaticKeyAuth or JWTAuth.
                 If None, creates StaticKeyAuth with the api_key.
             api_key: Shunyalabs API key. If None, uses SHUNYALABS_API_KEY env var.
-            url: REST API endpoint URL. If None, uses Shunyalabs_BATCH_URL env var
+            url: REST API endpoint URL. If None, uses SHUNYALABS_BATCH_URL env var
                  or defaults to production endpoint.
             conn_config: Complete connection configuration.
 

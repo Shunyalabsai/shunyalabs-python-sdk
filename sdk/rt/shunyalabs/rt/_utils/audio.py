@@ -4,7 +4,7 @@ import base64
 from typing import Any
 
 try:
-    import numpy as np
+    import numpy as np  # type: ignore[import-not-found]
     HAS_NUMPY = True
 except ImportError:
     HAS_NUMPY = False
@@ -116,26 +116,26 @@ def convert_to_pcm_f32le(
         # μ-law: 8-bit encoded, need to decode
         # Standard ITU-T G.711 μ-law decoding
         mulaw_samples = np.frombuffer(audio_data, dtype=np.uint8)
-        
+
         # Invert all bits
         mulaw_samples = ~mulaw_samples
-        
+
         # Extract sign bit (bit 7)
         sign = (mulaw_samples & 0x80) != 0
-        
+
         # Extract exponent (bits 4-6)
         exponent = (mulaw_samples & 0x70) >> 4
-        
+
         # Extract mantissa (bits 0-3)
         mantissa = mulaw_samples & 0x0F
-        
+
         # Reconstruct linear value: (mantissa + 33) * 2^(exponent) - 33
         linear = (mantissa + 33).astype(np.int16)
         linear = (linear << exponent) - 33
-        
+
         # Apply sign
         linear = np.where(sign, -linear, linear)
-        
+
         # Normalize to [-1.0, 1.0] range (μ-law uses range -8159 to 8159)
         float_samples = linear.astype(np.float32) / 8159.0
 
@@ -161,4 +161,4 @@ def convert_to_pcm_f32le(
     float_samples = np.clip(float_samples, -1.0, 1.0)
 
     # Convert back to bytes (PCM_F32LE)
-    return float_samples.astype(np.float32, copy=False).tobytes()
+    return bytes(float_samples.astype(np.float32, copy=False).tobytes())

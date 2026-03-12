@@ -51,16 +51,25 @@ help:
 	@echo ""
 
 # Testing targets
-test-all: test-rt test-batch test-flow test-tts
+test-all: test-core test-asr test-flow test-tts
 
-test-rt:
-	pytest tests/rt/ -v
+test-core:
+	pip install -e ".[dev]" -q && pytest tests/core/ tests/test_client.py -v
+
+test-asr:
+	pytest tests/asr/ -v
 
 test-batch:
-	pytest tests/batch/ -v
+	@echo "No batch-specific tests yet"
+
+test-rt:
+	@echo "No rt-specific tests yet (use test-asr)"
 
 test-flow:
 	pytest tests/flow/ -v
+
+test-tts:
+	pytest tests/tts/ -v
 
 # Formatting targets
 format-all: format-rt format-batch format-flow format-tts
