@@ -118,7 +118,7 @@ class Transport:
                 WS_HEADERS_KEY: ws_headers,
                 **self._conn_config.to_dict(),
             }
-            
+
             # Create SSL context that handles SNI properly
             # Extract hostname from URL for SNI
             parsed_url = urlparse(url_with_params)

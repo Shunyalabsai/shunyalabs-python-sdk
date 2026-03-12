@@ -35,7 +35,7 @@ def build_start_recognition_message(
     Returns:
         The start recognition message.
     """
-    
+
     # API Gateway format
     if use_api_gateway_format:
         # Extract language from transcription config - ensure it's passed to ASR
@@ -46,7 +46,7 @@ def build_start_recognition_message(
         else:
             # Ensure language is a string (in case it's passed as Language enum or other type)
             language = str(language) if language else None
-        
+
         # Build config dict matching API Gateway expected format (from test_apigw_ws_send_passthrough.py)
         effective_session_id = session_id or "default-session"
         config = {
@@ -59,10 +59,10 @@ def build_start_recognition_message(
             "inactivity_timeout": 3600.0,  # 1 hour (3600 seconds) for direct connections
             "use_vad": True,  # Voice Activity Detection
         }
-        
+
         if api_key:
             config["api_key"] = api_key
-        
+
         # API Gateway format - match test_apigw_ws_send_passthrough.py format
         init_msg = {
             "type": "init",
@@ -70,13 +70,13 @@ def build_start_recognition_message(
             "connection_id": effective_session_id,  # Use session_id as connection_id
             "config": config,
         }
-        
+
         # Also include api_key at top level for compatibility (matching working test)
         if api_key:
             init_msg["api_key"] = api_key
-        
+
         return init_msg
-    
+
     # Standard SDK format
     start_recognition_message = {
         "message": ClientMessageType.START_RECOGNITION,

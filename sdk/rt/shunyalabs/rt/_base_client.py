@@ -134,9 +134,9 @@ class _BaseClient(EventEmitter):
         await self.close()
 
     async def send_audio(
-        self, 
-        payload: bytes, 
-        session_id: Optional[str] = None, 
+        self,
+        payload: bytes,
+        session_id: Optional[str] = None,
         sample_rate: Optional[int] = None,
         input_encoding: Optional[AudioEncoding] = None,
     ) -> None:
@@ -155,7 +155,7 @@ class _BaseClient(EventEmitter):
         Examples:
             >>> audio_chunk = b""
             >>> await client.send_audio(audio_chunk)
-            
+
             >>> # Convert from PCM_S16LE automatically
             >>> await client.send_audio(
             ...     audio_chunk,
@@ -169,7 +169,7 @@ class _BaseClient(EventEmitter):
             raise ValueError("Payload must be bytes")
 
         effective_sample_rate = int(sample_rate or self._sample_rate)
-        
+
         # Convert audio to PCM_F32LE if needed (for API Gateway format)
         if self._use_api_gateway_format and input_encoding and input_encoding != AudioEncoding.PCM_F32LE:
             from ._utils.audio import convert_to_pcm_f32le
@@ -198,7 +198,7 @@ class _BaseClient(EventEmitter):
 
         # Calculate audio duration for logging (after conversion, always float32 = 4 bytes per sample)
         audio_duration_ms = (len(payload) / 4 / effective_sample_rate * 1000) if payload else 0
-        
+
         self._logger.debug(
             "Sending audio chunk: seq_no=%d, size=%d bytes, duration=%.2f ms, sample_rate=%d Hz",
             self._seq_no + 1, len(payload), audio_duration_ms, effective_sample_rate
@@ -210,10 +210,10 @@ class _BaseClient(EventEmitter):
                 # Match the format from test_apigw_ws_send_passthrough.py
                 import base64
                 b64_audio = base64.b64encode(payload).decode("ascii")
-                
+
                 # Use session_id as connection_id (matching working test)
                 effective_session_id = session_id or self._session_id or "default-session"
-                
+
                 frame_msg = {
                     "type": "frame",
                     "session_id": effective_session_id,
@@ -226,7 +226,7 @@ class _BaseClient(EventEmitter):
                         "sr": effective_sample_rate,
                     },
                 }
-                
+
                 self._logger.debug(
                     "Sending API Gateway frame: session_id=%s, frame_seq=%d, audio_size=%d bytes, b64_size=%d chars",
                     effective_session_id, self._seq_no + 1, len(payload), len(b64_audio)
@@ -236,7 +236,7 @@ class _BaseClient(EventEmitter):
                 # Standard format: send as binary
                 self._logger.debug("Sending binary audio frame: size=%d bytes", len(payload))
                 await self._transport.send_message(payload)
-            
+
             self._seq_no += 1
             self._logger.debug("Audio chunk sent successfully: seq_no=%d", self._seq_no)
         except Exception as e:
@@ -285,7 +285,7 @@ class _BaseClient(EventEmitter):
                     # Also print to help debug transcript messages
                     if self._use_api_gateway_format:
                         # Check for any transcript-related keys
-                        transcript_keys = [k for k in msg.keys() if "segment" in str(k).lower() or "text" in str(k).lower() or "transcript" in str(k).lower()]
+                        transcript_keys = [k for k in msg if "segment" in str(k).lower() or "text" in str(k).lower() or "transcript" in str(k).lower()]
                         if transcript_keys:
                             self._logger.info("API Gateway transcript-related keys found: %s", transcript_keys)
                             for key in transcript_keys:
@@ -305,11 +305,11 @@ class _BaseClient(EventEmitter):
                                 "message": "RecognitionStarted",
                                 "id": msg.get("session_id") or self._session_id or request_id or "default"
                             }
-                            self._logger.info("🔵 CONTROL MESSAGE FORWARDING: RecognitionStarted -> %d handler(s)", 
+                            self._logger.info("🔵 CONTROL MESSAGE FORWARDING: RecognitionStarted -> %d handler(s)",
                                             len(self.listeners(ServerMessageType.RECOGNITION_STARTED)))
                             self.emit(ServerMessageType.RECOGNITION_STARTED, converted_msg)
                             continue
-                        
+
                         # Handle segments format (API Gateway transcript format)
                         if "segments" in msg and isinstance(msg["segments"], list):
                             self._logger.info("Received transcript message with %d segment(s)", len(msg["segments"]))
@@ -318,7 +318,7 @@ class _BaseClient(EventEmitter):
                                 if not text:
                                     self._logger.debug("Skipping segment %d with no text: %s", idx, seg)
                                     continue
-                                
+
                                 completed = bool(seg.get("completed", False))
                                 start_time = float(seg.get("start") or 0.0)
                                 end_time = seg.get("end")
@@ -326,13 +326,13 @@ class _BaseClient(EventEmitter):
                                     end_time = float(end_time)
                                 else:
                                     end_time = start_time + 1.0  # Default duration
-                                
+
                                 segment_duration = end_time - start_time
                                 self._logger.info(
                                     "Processing transcript segment %d: type=%s, text='%s', start=%.2fs, end=%.2fs, duration=%.2fs",
                                     idx, "FINAL" if completed else "PARTIAL", text, start_time, end_time, segment_duration
                                 )
-                                
+
                                 # Convert to SDK format
                                 if completed:
                                     # Final transcript - collect text for later combination
@@ -341,7 +341,7 @@ class _BaseClient(EventEmitter):
                                         "✓ Final transcript segment %d collected: '%s' (total segments: %d, total text length: %d chars)",
                                         len(self._completed_segments), text, len(self._completed_segments), len(text)
                                     )
-                                    
+
                                     converted_msg = {
                                         "message": "AddTranscript",
                                         "format": "2.1",
@@ -375,20 +375,20 @@ class _BaseClient(EventEmitter):
                                     )
                                     self.emit(ServerMessageType.ADD_PARTIAL_TRANSCRIPT, converted_msg)
                             continue
-                        
+
                         # Check for other possible transcript formats
                         # Some API Gateway implementations might send transcripts directly
                         if "text" in msg and "segments" not in msg:
                             self._logger.warning("Received message with 'text' but no 'segments' key: %s", msg)
                         if "transcript" in msg:
                             self._logger.warning("Received message with 'transcript' key: %s", msg)
-                        
+
                         # Handle other API Gateway messages (language detection, etc.)
                         if "language" in msg and "language_prob" in msg:
                             # Language detection - can be logged or ignored
                             self._logger.debug("Detected language: %s (p=%.2f)", msg.get("language"), float(msg.get("language_prob") or 0))
                             continue
-                        
+
                         # Handle error messages
                         if msg.get("type") == "error":
                             self._logger.warning("🔴 CONTROL MESSAGE RECEIVED: Error (raw: %s)", msg)
@@ -396,11 +396,11 @@ class _BaseClient(EventEmitter):
                                 "message": "Error",
                                 "reason": msg.get("message", "Unknown error")
                             }
-                            self._logger.warning("🔴 CONTROL MESSAGE FORWARDING: Error -> %d handler(s)", 
+                            self._logger.warning("🔴 CONTROL MESSAGE FORWARDING: Error -> %d handler(s)",
                                                 len(self.listeners(ServerMessageType.ERROR)))
                             self.emit(ServerMessageType.ERROR, error_msg)
                             continue
-                    
+
                     # Handle DISCONNECT message - combine and print all completed segments
                     if msg.get("message") == "DISCONNECT" or msg.get("type") == "disconnect":
                         self._logger.info("🟡 CONTROL MESSAGE RECEIVED: DISCONNECT (raw: %s)", msg)
@@ -410,7 +410,7 @@ class _BaseClient(EventEmitter):
                         self._logger.info("🟡 CONTROL MESSAGE FORWARDING: DISCONNECT (emitting as string)")
                         self.emit("DISCONNECT", msg)  # DISCONNECT is not in ServerMessageType enum
                         continue
-                    
+
                     # Handle EndOfTranscript in both standard and API Gateway formats
                     # Standard format: {"message": "EndOfTranscript"}
                     # API Gateway format: {"event": "END_OF_TRANSCRIPTION", "uid": "..."}
@@ -425,15 +425,15 @@ class _BaseClient(EventEmitter):
                                 "message": "EndOfTranscript",
                                 "uid": msg.get("uid"),
                             }
-                            self._logger.info("🟢 CONTROL MESSAGE FORWARDING: EndOfTranscript (converted from END_OF_TRANSCRIPTION) -> %d handler(s)", 
+                            self._logger.info("🟢 CONTROL MESSAGE FORWARDING: EndOfTranscript (converted from END_OF_TRANSCRIPTION) -> %d handler(s)",
                                             len(self.listeners(ServerMessageType.END_OF_TRANSCRIPT)))
                             self.emit(ServerMessageType.END_OF_TRANSCRIPT, converted_eot)
                         else:
-                            self._logger.info("🟢 CONTROL MESSAGE FORWARDING: EndOfTranscript -> %d handler(s)", 
+                            self._logger.info("🟢 CONTROL MESSAGE FORWARDING: EndOfTranscript -> %d handler(s)",
                                             len(self.listeners(ServerMessageType.END_OF_TRANSCRIPT)))
                             self.emit(ServerMessageType.END_OF_TRANSCRIPT, msg)
                         continue
-                    
+
                     # Handle standard SDK format or other messages
                     if "message" in msg:
                         msg_type = msg["message"]
@@ -445,10 +445,10 @@ class _BaseClient(EventEmitter):
                             "AddTranslation", "AddPartialTranslation", "SpeakersResult"
                         ]
                         is_control = msg_type in control_messages
-                        
+
                         if is_control:
                             self._logger.info("🟣 CONTROL MESSAGE RECEIVED: %s (standard format, raw: %s)", msg_type, msg)
-                        
+
                         # Also collect completed segments from standard SDK format
                         if msg["message"] == "AddTranscript":
                             metadata = msg.get("metadata", {})
@@ -471,7 +471,7 @@ class _BaseClient(EventEmitter):
                                     "Received AddPartialTranscript (standard format): text='%s', time=[%.2fs-%.2fs], duration=%.2fs",
                                     transcript_text, start_time, end_time, end_time - start_time
                                 )
-                        
+
                         # Try to map message string to ServerMessageType enum for logging
                         try:
                             # Map common message types to enum
@@ -499,26 +499,23 @@ class _BaseClient(EventEmitter):
                                 self._logger.info("🟣 CONTROL MESSAGE FORWARDING: %s (no enum mapping, emitting as string)", msg_type)
                         except Exception:
                             pass
-                        
+
                         self.emit(msg["message"], msg)
-                    
+
                     # Log any unhandled messages for debugging
-                    if self._use_api_gateway_format:
-                        # Check if this message wasn't handled by any of the above conditions
-                        # Exclude END_OF_TRANSCRIPTION event since we handle it above
-                        if (msg.get("message") not in ["SERVER_READY", "DISCONNECT", "EndOfTranscript"] and 
-                            msg.get("event") not in ["END_OF_TRANSCRIPTION"] and
-                            "segments" not in msg and 
-                            "language" not in msg and 
-                            msg.get("type") != "error"):
-                            self._logger.warning("Unhandled API Gateway message (may contain transcripts): %s", msg)
-                            # Check if it might be a transcript in a different format
-                            msg_keys = list(msg.keys())
-                            self._logger.info("Message keys: %s", msg_keys)
-                            # Try to find any text/transcript data in alternative formats
-                            for key in msg_keys:
-                                if "text" in key.lower() or "transcript" in key.lower() or "segment" in key.lower():
-                                    self._logger.warning("Found potential transcript key '%s' with value: %s", key, msg.get(key))
+                    if (self._use_api_gateway_format
+                        and msg.get("message") not in ["SERVER_READY", "DISCONNECT", "EndOfTranscript"]
+                        and msg.get("event") not in ["END_OF_TRANSCRIPTION"]
+                        and "segments" not in msg
+                        and "language" not in msg
+                        and msg.get("type") != "error"):
+                        self._logger.warning("Unhandled API Gateway message (may contain transcripts): %s", msg)
+                        msg_keys = list(msg.keys())
+                        self._logger.info("Message keys: %s", msg_keys)
+                        # Try to find any text/transcript data in alternative formats
+                        for key in msg_keys:
+                            if "text" in key.lower() or "transcript" in key.lower() or "segment" in key.lower():
+                                self._logger.warning("Found potential transcript key '%s' with value: %s", key, msg.get(key))
         except asyncio.CancelledError:
             pass
         except Exception as exc:
@@ -550,7 +547,7 @@ class _BaseClient(EventEmitter):
     ) -> tuple[TranscriptionConfig, AudioFormat]:
         transcription_config = transcription_config or TranscriptionConfig()
         audio_format = audio_format or AudioFormat()
-        
+
         # Store session_id and sample_rate
         # Try to get request_id from session if it exists, otherwise use provided session_id or default
         request_id = None
@@ -571,7 +568,7 @@ class _BaseClient(EventEmitter):
             deliver_deltas_only=deliver_deltas_only,
             use_api_gateway_format=use_api_gateway_format,
         )
-        
+
         # Log language being sent to ASR (for API Gateway format)
         if use_api_gateway_format and "config" in start_recognition_message:
             language = start_recognition_message["config"].get("language")

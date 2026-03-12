@@ -43,7 +43,7 @@ class Microphone:
 
         # Check if pyaudio is available
         try:
-            import pyaudio
+            import pyaudio  # type: ignore[import-untyped]
 
             self._pyaudio = pyaudio
 

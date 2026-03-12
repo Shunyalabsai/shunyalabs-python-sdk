@@ -14,7 +14,7 @@ This guide helps users migrate from the legacy Shunyalabs Flow Client (`shunyala
 
 ### Breaking Changes
 
-- **Import paths**: `Shunyalabs_flow.client` → `shunyalabs.flow`
+- **Import paths**: `shunyalabs_flow.client` → `shunyalabs.flow`
 - **Client class**: `WebsocketClient` → `AsyncClient`
 - **Method names**: `.run()` → `.start_conversation()` for conversation operations
 - **Event registration**: `.add_event_handler()` → `.on()`
@@ -45,7 +45,7 @@ from shunyalabs_flow.models import (
 
 client = WebsocketClient(
     ConnectionSettings(
-        url="wss://flow.api.Shunyalabs.com/v1/flow",
+        url="wss://flow.api.shunyalabs.com/v1/flow",
         auth_token="API-KEY",
     )
 )
@@ -87,7 +87,7 @@ from shunyalabs_flow.models import (
 
 client = WebsocketClient(
     ConnectionSettings(
-        url="wss://flow.api.Shunyalabs.com/v1/flow",
+        url="wss://flow.api.shunyalabs.com/v1/flow",
         auth_token="API-KEY",
     )
 )
@@ -150,7 +150,7 @@ from shunyalabs_flow.models import ConnectionSettings
 # JWT generation was handled manually or through external libraries
 client = WebsocketClient(
     ConnectionSettings(
-        url="wss://flow.api.Shunyalabs.com/v1/flow",
+        url="wss://flow.api.shunyalabs.com/v1/flow",
         auth_token="API-KEY",
         generate_temp_token=True,
     )

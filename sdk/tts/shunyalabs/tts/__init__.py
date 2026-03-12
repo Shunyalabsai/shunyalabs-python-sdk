@@ -1,4 +1,4 @@
-__version__ = "0.0.0"
+__version__ = "2.0.1rc1"
 
 from ._async_client import AsyncClient
 from ._auth import AuthBase

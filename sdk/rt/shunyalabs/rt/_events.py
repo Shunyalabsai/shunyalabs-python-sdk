@@ -18,8 +18,8 @@ class EventEmitter:
     """
 
     def __init__(self) -> None:
-        self._handlers: dict[ServerMessageType, set[Callable]] = {}
-        self._once_handlers: dict[ServerMessageType, set[Callable]] = {}
+        self._handlers: dict[ServerMessageType | str, set[Callable]] = {}
+        self._once_handlers: dict[ServerMessageType | str, set[Callable]] = {}
         self._logger = get_logger("shunyalabs.rt.event_emitter")
 
     def on(self, event: ServerMessageType, callback: Optional[Callable] = None) -> Callable:
@@ -103,7 +103,7 @@ class EventEmitter:
             total_handlers = len(self._handlers.get(event, set())) + len(self._once_handlers.get(event, set()))
             if total_handlers > 0:
                 self._logger.debug("📤 EventEmitter: Calling %d handler(s) for %s", total_handlers, event)
-        
+
         # Call persistent handlers
         for callback in self._handlers.get(event, set()).copy():
             try:
