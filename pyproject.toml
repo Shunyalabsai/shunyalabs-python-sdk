@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "shunyalabs"
-version = "2.0.2rc1"
+version = "2.0.2rc2"
 description = "Shunyalabs Python SDK — ASR, TTS, and Conversational AI"
 readme = "README.md"
 authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
