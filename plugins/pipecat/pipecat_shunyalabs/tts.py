@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import logging
 import os
+import inspect
 from typing import AsyncGenerator, Optional
 
 from pipecat.frames.frames import (
@@ -36,6 +37,11 @@ from pipecat.frames.frames import (
 )
 from pipecat.services.tts_service import TTSService
 
+try:
+    from pipecat.services.settings import TTSSettings as _TTSSettings
+except ImportError:
+    _TTSSettings = None
+
 from shunyalabs._core._auth import StaticKeyAuth
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.tts._models import TTSConfig
@@ -45,7 +51,9 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_WS_URL = "wss://tts.shunyalabs.ai/ws"
 
-
+def _supports_context(frame_cls):
+        return "context_id" in inspect.signature(frame_cls.__init__).parameters
+        
 class ShunyalabsTTSService(TTSService):
     """Pipecat TTS service backed by the Shunyalabs TTS gateway.
 
@@ -56,7 +64,7 @@ class ShunyalabsTTSService(TTSService):
         url: WebSocket endpoint URL.
         model: TTS model name (e.g. ``"zero-indic"``).
         voice: Speaker voice name (e.g. ``"Rajesh"``, ``"Varun"``).
-        speaker: Speaker name (e.g. ``"Rajesh"``). Used for voice selection via ``TTSConfig``.
+        speaker: Speaker name prefix for text formatting (e.g. ``"Rajesh"``).
         style: Emotion style tag (e.g. ``"<Happy>"``).
         language: Language code for transliteration (e.g. ``"en"``, ``"hi"``).
         output_format: Audio format (default ``"pcm"``).
@@ -79,6 +87,9 @@ class ShunyalabsTTSService(TTSService):
         speed: float = 1.0,
         **kwargs,
     ) -> None:
+        # Initialize settings for pipecat >=0.0.95 (backward-compatible)
+        if _TTSSettings is not None:
+            kwargs.setdefault("settings", _TTSSettings(model=model, voice=voice, language=language))
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key or os.environ.get("SHUNYALABS_API_KEY", "")
         if not self._api_key:
@@ -97,7 +108,7 @@ class ShunyalabsTTSService(TTSService):
         self._auth = StaticKeyAuth(self._api_key)
 
     def _format_text(self, text: str) -> str:
-        return f"{self._style} {text}"
+        return f"{self._speaker}: {self._style} {text}"
 
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""
@@ -121,22 +132,37 @@ class ShunyalabsTTSService(TTSService):
             ),
         )
 
-    async def run_tts(self, text: str, context_id: str) -> AsyncGenerator[Frame, None]:
-        """Synthesize text via the SDK and yield audio frames."""
+    async def run_tts(self, text: str, context_id: Optional[str] = None) -> AsyncGenerator[Frame, None]:
         formatted = self._format_text(text)
         logger.debug("ShunyalabsTTS synthesizing: %s", formatted[:80])
 
-        yield TTSStartedFrame(context_id=context_id)
+        supports_context = _supports_context(TTSStartedFrame)
+
+        if supports_context:
+            yield TTSStartedFrame(context_id=context_id)
+        else:
+            yield TTSStartedFrame()
 
         streaming_tts = self._make_streaming_tts()
         config = self._make_tts_config()
 
         async for audio_bytes in streaming_tts.stream(formatted, config=config):
-            yield TTSAudioRawFrame(
-                audio=audio_bytes,
-                sample_rate=self._sample_rate,
-                num_channels=1,
-                context_id=context_id,
-            )
 
-        yield TTSStoppedFrame(context_id=context_id)
+            if supports_context:
+                yield TTSAudioRawFrame(
+                    audio=audio_bytes,
+                    sample_rate=self._sample_rate,
+                    num_channels=1,
+                    context_id=context_id,
+                )
+            else:
+                yield TTSAudioRawFrame(
+                    audio=audio_bytes,
+                    sample_rate=self._sample_rate,
+                    num_channels=1,
+                )
+
+        if supports_context:
+            yield TTSStoppedFrame(context_id=context_id)
+        else:
+            yield TTSStoppedFrame()

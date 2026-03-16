@@ -42,6 +42,11 @@ from pipecat.frames.frames import (
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 
+try:
+    from pipecat.services.settings import STTSettings as _STTSettings
+except ImportError:
+    _STTSettings = None
+
 from shunyalabs._core._auth import StaticKeyAuth
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
@@ -50,23 +55,26 @@ from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WS_URL = "wss://asr.shunyalabs.ai/ws"
+_MIN_SEND_BYTES = 4096
 
 
 class ShunyalabsSTTService(STTService):
     """Pipecat STT service backed by the Shunyalabs ASR gateway.
 
-    Uses the Shunyalabs Python SDK for WebSocket streaming transport.
-
     Maintains one persistent WebSocket per pipeline run.  Audio chunks
-    received from the pipeline are forwarded to the gateway; transcription
-    events are pushed back into the pipeline as ``TranscriptionFrame`` /
+    received from the pipeline are buffered and forwarded to the gateway
+    in larger blocks (the gateway requires chunks of at least ~4 KB for
+    its VAD to function reliably).  Transcription events are pushed back
+    into the pipeline as ``TranscriptionFrame`` /
     ``InterimTranscriptionFrame``.
 
     Args:
-        api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
+        api_key: Shunyalabs API key.  Falls back to ``SHUNYALABS_API_KEY``
+            env var.
         language: Language code (e.g. ``"en"``, ``"hi"``) or ``"auto"``.
         url: WebSocket endpoint URL.
-        sample_rate: Audio sample rate expected by the gateway (default 16000).
+        sample_rate: Audio sample rate in Hz (default 16 000).
+        min_send_bytes: Minimum buffer size before sending to the gateway.
         **kwargs: Forwarded to ``STTService.__init__``.
     """
 
@@ -77,9 +85,13 @@ class ShunyalabsSTTService(STTService):
         language: str = "auto",
         url: str = _DEFAULT_WS_URL,
         sample_rate: int = 16000,
+        min_send_bytes: int = _MIN_SEND_BYTES,
         **kwargs,
     ) -> None:
-        super().__init__(**kwargs)
+        # Initialize settings for pipecat >=0.0.95 (backward-compatible)
+        if _STTSettings is not None:
+            kwargs.setdefault("settings", _STTSettings(model=None, language=language))
+        super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key or os.environ.get("SHUNYALABS_API_KEY", "")
         if not self._api_key:
             raise ValueError(
@@ -90,6 +102,8 @@ class ShunyalabsSTTService(STTService):
         self._sample_rate = sample_rate
         self._auth = StaticKeyAuth(self._api_key)
         self._conn: Optional[ASRStreamingConnection] = None
+        self._audio_buffer = bytearray()
+        self._min_send_bytes = min_send_bytes
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -128,11 +142,17 @@ class ShunyalabsSTTService(STTService):
 
             self._conn = await streaming.stream(config=config)
 
-            # Register event handlers that push frames into the pipeline
+            # Capture the running event loop so callbacks fired from
+            # background threads can safely schedule coroutines.
+            loop = asyncio.get_running_loop()
+
+            def _schedule(coro):
+                loop.call_soon_threadsafe(asyncio.ensure_future, coro)
+
             @self._conn.on(StreamingMessageType.PARTIAL)
             def on_partial(msg):
                 if msg.text:
-                    asyncio.ensure_future(self.push_frame(
+                    _schedule(self.push_frame(
                         InterimTranscriptionFrame(
                             text=msg.text,
                             user_id="",
@@ -144,7 +164,7 @@ class ShunyalabsSTTService(STTService):
             @self._conn.on(StreamingMessageType.FINAL_SEGMENT)
             def on_final_segment(msg):
                 if msg.text:
-                    asyncio.ensure_future(self.push_frame(
+                    _schedule(self.push_frame(
                         TranscriptionFrame(
                             text=msg.text,
                             user_id="",
@@ -156,7 +176,7 @@ class ShunyalabsSTTService(STTService):
             @self._conn.on(StreamingMessageType.FINAL)
             def on_final(msg):
                 if msg.text:
-                    asyncio.ensure_future(self.push_frame(
+                    _schedule(self.push_frame(
                         TranscriptionFrame(
                             text=msg.text,
                             user_id="",
@@ -175,8 +195,14 @@ class ShunyalabsSTTService(STTService):
             raise
 
     async def _disconnect(self) -> None:
-        """Send END and close the connection."""
+        """Flush remaining audio, send END, and close the connection."""
         if self._conn and not self._conn.is_closed:
+            if self._audio_buffer:
+                try:
+                    await self._conn.send_audio(bytes(self._audio_buffer))
+                except Exception:
+                    pass
+                self._audio_buffer.clear()
             try:
                 await self._conn.end()
             except Exception:
@@ -186,6 +212,7 @@ class ShunyalabsSTTService(STTService):
             except Exception:
                 pass
         self._conn = None
+        self._audio_buffer.clear()
         logger.info("ShunyalabsSTTService disconnected")
 
     # ------------------------------------------------------------------
@@ -193,16 +220,25 @@ class ShunyalabsSTTService(STTService):
     # ------------------------------------------------------------------
 
     async def run_stt(self, audio: bytes) -> AsyncGenerator[Frame, None]:
-        """Forward raw PCM bytes to the gateway via the SDK.
+        """Buffer and forward raw PCM bytes to the gateway.
 
-        Transcription results arrive asynchronously via event handlers,
-        which call ``push_frame()`` directly.  Nothing is yielded here.
+        Small audio frames from the pipeline are accumulated until at
+        least ``min_send_bytes`` are available, then sent as a single
+        chunk.  The Shunyalabs gateway requires adequately sized chunks
+        for its built-in VAD to detect speech reliably.
+
+        Transcription results arrive asynchronously via the event
+        handlers registered in :meth:`_connect`.
         """
         if self._conn and not self._conn.is_closed:
-            try:
-                await self._conn.send_audio(audio)
-            except Exception:
-                logger.warning("ShunyalabsSTTService send failed; reconnecting")
-                await self._connect()
-                await self._conn.send_audio(audio)
-        yield  # async generator -- no frames yielded synchronously
+            self._audio_buffer.extend(audio)
+            while len(self._audio_buffer) >= self._min_send_bytes:
+                chunk = bytes(self._audio_buffer[:self._min_send_bytes])
+                del self._audio_buffer[:self._min_send_bytes]
+                try:
+                    await self._conn.send_audio(chunk)
+                except Exception:
+                    logger.warning("ShunyalabsSTTService send failed; reconnecting")
+                    await self._connect()
+                    await self._conn.send_audio(chunk)
+        yield  # async generator — no frames yielded synchronously
