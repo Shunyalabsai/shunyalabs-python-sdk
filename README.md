@@ -139,15 +139,15 @@ asyncio.run(main())
 
 #### `AsyncShunyaClient`
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `api_key` | `str` | `None` | API key. Falls back to `SHUNYALABS_API_KEY` env var. |
-| `timeout` | `float` | `60.0` | Request timeout in seconds. |
-| `max_retries` | `int` | `2` | Retries for failed requests (5xx, connection errors). |
-| `asr_url` | `str` | `https://asr.shunyalabs.ai` | ASR batch API base URL. |
-| `asr_ws_url` | `str` | `wss://asr.shunyalabs.ai/ws` | ASR streaming WebSocket URL. |
-| `tts_url` | `str` | `https://tts.shunyalabs.ai` | TTS batch API base URL. |
-| `tts_ws_url` | `str` | `wss://tts.shunyalabs.ai/ws` | TTS streaming WebSocket URL. |
+| Parameter     | Type    | Default                      | Description                                           |
+| ------------- | ------- | ---------------------------- | ----------------------------------------------------- |
+| `api_key`     | `str`   | `None`                       | API key. Falls back to `SHUNYALABS_API_KEY` env var.  |
+| `timeout`     | `float` | `60.0`                       | Request timeout in seconds.                           |
+| `max_retries` | `int`   | `2`                          | Retries for failed requests (5xx, connection errors). |
+| `asr_url`     | `str`   | `https://asr.shunyalabs.ai`  | ASR batch API base URL.                               |
+| `asr_ws_url`  | `str`   | `wss://asr.shunyalabs.ai/ws` | ASR streaming WebSocket URL.                          |
+| `tts_url`     | `str`   | `https://tts.shunyalabs.ai`  | TTS batch API base URL.                               |
+| `tts_ws_url`  | `str`   | `wss://tts.shunyalabs.ai/ws` | TTS streaming WebSocket URL.                          |
 
 All URL parameters can also be set via environment variables: `SHUNYALABS_ASR_URL`, `SHUNYALABS_ASR_WS_URL`, `SHUNYALABS_TTS_URL`, `SHUNYALABS_TTS_WS_URL`.
 
@@ -177,16 +177,16 @@ client = AsyncShunyaClient(
 
 Configuration for synthesis requests. Passed as `config=` to `synthesize()` and `stream()`.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `model` | `str` | **required** | Model name (e.g. `"zero-indic"`). |
-| `voice` | `str` | **required** | Speaker voice name. See [Available Speakers](#available-speakers). |
-| `response_format` | `OutputFormat` | `"mp3"` | Output audio format. See [Output Formats](#output-formats). |
-| `speed` | `float` | `1.0` | Speaking speed multiplier (0.25–4.0). |
-| `trim_silence` | `bool` | `False` | Trim leading/trailing silence from audio. |
-| `volume_normalization` | `str` | `None` | `"peak"` or `"loudness"`. |
-| `background_audio` | `str` | `None` | Preset name or base64-encoded background audio. |
-| `background_volume` | `float` | `0.1` | Background volume relative to speech (0.0–1.0). |
+| Parameter              | Type           | Default      | Description                                                        |
+| ---------------------- | -------------- | ------------ | ------------------------------------------------------------------ |
+| `model`                | `str`          | **required** | Model name (e.g. `"zero-indic"`).                                  |
+| `voice`                | `str`          | **required** | Speaker voice name. See [Available Speakers](#available-speakers). |
+| `response_format`      | `OutputFormat` | `"mp3"`      | Output audio format. See [Output Formats](#output-formats).        |
+| `speed`                | `float`        | `1.0`        | Speaking speed multiplier (0.25–4.0).                              |
+| `trim_silence`         | `bool`         | `False`      | Trim leading/trailing silence from audio.                          |
+| `volume_normalization` | `str`          | `None`       | `"peak"` or `"loudness"`.                                          |
+| `background_audio`     | `str`          | `None`       | Preset name or base64-encoded background audio.                    |
+| `background_volume`    | `float`        | `0.1`        | Background volume relative to speech (0.0–1.0).                    |
 
 #### TTS Parameter Examples
 
@@ -328,31 +328,31 @@ result.save("podcast_intro.mp3")
 
 Each speaker has a native language listed below, but **every speaker can speak in any language** — the native language only indicates the speaker's voice characteristics and accent.
 
-| Language | Male Speaker | Female Speaker |
-|----------|-------------|----------------|
-| Assamese | `Bimal` | `Anjana` |
-| Bengali | `Arjun` | `Priyanka` |
-| Bodo | `Daimalu` | `Hasina` |
-| Dogri | `Vishal` | `Neelam` |
-| English | `Varun` | `Nisha` |
-| Gujarati | `Rakesh` | `Pooja` |
-| Hindi | `Rajesh` | `Sunita` |
-| Kannada | `Kiran` | `Shreya` |
-| Kashmiri | `Farooq` | `Habba` |
-| Konkani | `Mohan` | `Sarita` |
-| Maithili | `Suresh` | `Meera` |
-| Malayalam | `Krishnan` | `Deepa` |
-| Manipuri | `Tomba` | `Ibemhal` |
-| Marathi | `Siddharth` | `Ananya` |
-| Nepali | `Bikash` | `Sapana` |
-| Odia | `Bijay` | `Sujata` |
-| Punjabi | `Gurpreet` | `Simran` |
-| Sanskrit | `Vedant` | `Gayatri` |
-| Santali | `Chandu` | `Roshni` |
-| Sindhi | `Amjad` | `Kavita` |
-| Tamil | `Murugan` | `Thangam` |
-| Telugu | `Vishnu` | `Lakshmi` |
-| Urdu | `Salman` | `Fatima` |
+| Language  | Male Speaker | Female Speaker |
+| --------- | ------------ | -------------- |
+| Assamese  | `Bimal`      | `Anjana`       |
+| Bengali   | `Arjun`      | `Priyanka`     |
+| Bodo      | `Daimalu`    | `Hasina`       |
+| Dogri     | `Vishal`     | `Neelam`       |
+| English   | `Varun`      | `Nisha`        |
+| Gujarati  | `Rakesh`     | `Pooja`        |
+| Hindi     | `Rajesh`     | `Sunita`       |
+| Kannada   | `Kiran`      | `Shreya`       |
+| Kashmiri  | `Farooq`     | `Habba`        |
+| Konkani   | `Mohan`      | `Sarita`       |
+| Maithili  | `Suresh`     | `Meera`        |
+| Malayalam | `Krishnan`   | `Deepa`        |
+| Manipuri  | `Tomba`      | `Ibemhal`      |
+| Marathi   | `Siddharth`  | `Ananya`       |
+| Nepali    | `Bikash`     | `Sapana`       |
+| Odia      | `Bijay`      | `Sujata`       |
+| Punjabi   | `Gurpreet`   | `Simran`       |
+| Sanskrit  | `Vedant`     | `Gayatri`      |
+| Santali   | `Chandu`     | `Roshni`       |
+| Sindhi    | `Amjad`      | `Kavita`       |
+| Tamil     | `Murugan`    | `Thangam`      |
+| Telugu    | `Vishnu`     | `Lakshmi`      |
+| Urdu      | `Salman`     | `Fatima`       |
 
 **23 languages, 46 speakers** (1 male + 1 female per language).
 
@@ -360,19 +360,19 @@ Each speaker has a native language listed below, but **every speaker can speak i
 
 Control the emotional tone by passing a style tag before the text (e.g. `"<Happy> Hello!"`).
 
-| Style Tag | Description |
-|-----------|-------------|
-| `<Happy>` | Joyful, upbeat tone |
-| `<Sad>` | Somber, melancholic tone |
-| `<Angry>` | Forceful, intense tone |
-| `<Fearful>` | Anxious, trembling tone |
-| `<Surprised>` | Exclamatory, astonished tone |
-| `<Disgust>` | Repulsed, disapproving tone |
-| `<News>` | Formal news-anchor style |
-| `<Conversational>` | Casual, everyday speech |
-| `<Narrative>` | Storytelling / audiobook style |
-| `<Enthusiastic>` | Energetic, passionate tone |
-| `<Neutral>` | Clean read-speech (default, no tag needed) |
+| Style Tag          | Description                                |
+| ------------------ | ------------------------------------------ |
+| `<Happy>`          | Joyful, upbeat tone                        |
+| `<Sad>`            | Somber, melancholic tone                   |
+| `<Angry>`          | Forceful, intense tone                     |
+| `<Fearful>`        | Anxious, trembling tone                    |
+| `<Surprised>`      | Exclamatory, astonished tone               |
+| `<Disgust>`        | Repulsed, disapproving tone                |
+| `<News>`           | Formal news-anchor style                   |
+| `<Conversational>` | Casual, everyday speech                    |
+| `<Narrative>`      | Storytelling / audiobook style             |
+| `<Enthusiastic>`   | Energetic, passionate tone                 |
+| `<Neutral>`        | Clean read-speech (default, no tag needed) |
 
 **Expression style examples:**
 
@@ -400,15 +400,15 @@ result = await client.tts.synthesize("Your account balance is five thousand rupe
 
 #### Output Formats
 
-| Format | Value |
-|--------|-------|
-| PCM (raw) | `"pcm"` |
-| WAV | `"wav"` |
-| MP3 | `"mp3"` |
-| OGG Opus | `"ogg_opus"` |
-| FLAC | `"flac"` |
-| mu-law | `"mulaw"` |
-| A-law | `"alaw"` |
+| Format    | Value        |
+| --------- | ------------ |
+| PCM (raw) | `"pcm"`      |
+| WAV       | `"wav"`      |
+| MP3       | `"mp3"`      |
+| OGG Opus  | `"ogg_opus"` |
+| FLAC      | `"flac"`     |
+| mu-law    | `"mulaw"`    |
+| A-law     | `"alaw"`     |
 
 #### TTS Methods
 
@@ -443,50 +443,91 @@ await client.tts.stream_to_file("text", "output.pcm", config=TTSConfig(...))
 
 Returned by `synthesize()`.
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `audio_data` | `bytes` | Decoded audio bytes. |
-| `sample_rate` | `int` | Audio sample rate in Hz. |
-| `format` | `str` | Audio format string. |
+| Attribute     | Type    | Description              |
+| ------------- | ------- | ------------------------ |
+| `audio_data`  | `bytes` | Decoded audio bytes.     |
+| `sample_rate` | `int`   | Audio sample rate in Hz. |
+| `format`      | `str`   | Audio format string.     |
 
 ---
 
 ### ASR API
 
+#### Supported Audio & Video Formats
+
+The following formats are natively supported. For video inputs, the audio track is automatically extracted before transcription begins.
+
+**Audio Formats**
+
+| Format       | Extension       | Notes                                 |
+| ------------ | --------------- | ------------------------------------- |
+| WAV          | `.wav`          | Recommended — lossless, best accuracy |
+| FLAC         | `.flac`         | Lossless compression                  |
+| MP3          | `.mp3`          | Widely supported lossy format         |
+| M4A / AAC    | `.m4a`, `.aac`  | Common mobile/Apple format            |
+| OGG / OPUS   | `.ogg`, `.opus` | Open container / low-latency codec    |
+| AMR / AMR-WB | `.amr`          | Telephony standard format             |
+| AIFF         | `.aiff`         | Apple lossless audio format           |
+
+**Video Formats**
+
+| Format | Extension |
+| ------ | --------- |
+| MP4    | `.mp4`    |
+| WebM   | `.webm`   |
+| MOV    | `.mov`    |
+| MKV    | `.mkv`    |
+
+> ✓ For best transcription accuracy, use **WAV** files with **PCM 16-bit** encoding at **16,000 Hz mono**.
+
+#### Sample Rate Requirements
+
+The API supports a range of sample rates to accommodate diverse audio sources including telephony recordings. Files provided at unlisted rates are automatically resampled during processing.
+
+| Sample Rate | Common Use Case                           |
+| ----------- | ----------------------------------------- |
+| 8,000 Hz    | Telephony / phone call recordings         |
+| 16,000 Hz   | Standard speech recognition (recommended) |
+| 22,050 Hz   | General audio                             |
+| 44,100 Hz   | CD-quality audio                          |
+| 48,000 Hz   | Professional broadcast audio              |
+
+> ℹ Audio provided at sample rates not listed above is automatically resampled to 16,000 Hz during processing. No manual conversion is required.
+
 #### `TranscriptionConfig`
 
 Configuration for batch transcription. Passed as `config=` to `transcribe()`.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `model` | `str` | **required** | Model name (e.g. `"zero-indic"`). |
-| `language_code` | `str` | `"auto"` | Language code or `"auto"` for auto-detection. |
-| `task` | `str` | `"transcribe"` | Task type (`"transcribe"`). |
-| `output_script` | `str` | `"auto"` | Output script (`"auto"`, `"latin"`, `"native"`). |
-| `enable_diarization` | `bool` | `False` | Enable speaker diarization. |
+| Parameter            | Type   | Default        | Description                                      |
+| -------------------- | ------ | -------------- | ------------------------------------------------ |
+| `model`              | `str`  | **required**   | Model name (e.g. `"zero-indic"`).                |
+| `language_code`      | `str`  | `"auto"`       | Language code or `"auto"` for auto-detection.    |
+| `task`               | `str`  | `"transcribe"` | Task type (`"transcribe"`).                      |
+| `output_script`      | `str`  | `"auto"`       | Output script (`"auto"`, `"latin"`, `"native"`). |
+| `enable_diarization` | `bool` | `False`        | Enable speaker diarization.                      |
 
 **NLP Features:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `enable_intent_detection` | `bool` | `False` | Detect intent from transcript. |
-| `intent_choices` | `list[str]` | `None` | Constrain intent to specific choices. |
-| `enable_summarization` | `bool` | `False` | Generate transcript summary. |
-| `summary_max_length` | `int` | `150` | Maximum summary length. |
-| `enable_sentiment_analysis` | `bool` | `False` | Analyze sentiment. |
-| `enable_emotion_diarization` | `bool` | `False` | Detect emotions per segment. |
+| Parameter                    | Type        | Default | Description                           |
+| ---------------------------- | ----------- | ------- | ------------------------------------- |
+| `enable_intent_detection`    | `bool`      | `False` | Detect intent from transcript.        |
+| `intent_choices`             | `list[str]` | `None`  | Constrain intent to specific choices. |
+| `enable_summarization`       | `bool`      | `False` | Generate transcript summary.          |
+| `summary_max_length`         | `int`       | `150`   | Maximum summary length.               |
+| `enable_sentiment_analysis`  | `bool`      | `False` | Analyze sentiment.                    |
+| `enable_emotion_diarization` | `bool`      | `False` | Detect emotions per segment.          |
 
 **Post-processing:**
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `enable_profanity_hashing` | `bool` | `False` | Hash profane words. |
-| `hash_keywords` | `list[str]` | `None` | Custom keywords to hash. |
-| `enable_keyterm_normalization` | `bool` | `False` | Normalize key terms. |
-| `enable_translation` | `bool` | `False` | Translate transcript. |
-| `target_language` | `str` | `None` | Target language for translation. |
-| `enable_transliteration` | `bool` | `False` | Transliterate transcript. |
-| `project` | `str` | `None` | Project name for tracking. |
+| Parameter                      | Type        | Default | Description                      |
+| ------------------------------ | ----------- | ------- | -------------------------------- |
+| `enable_profanity_hashing`     | `bool`      | `False` | Hash profane words.              |
+| `hash_keywords`                | `list[str]` | `None`  | Custom keywords to hash.         |
+| `enable_keyterm_normalization` | `bool`      | `False` | Normalize key terms.             |
+| `enable_translation`           | `bool`      | `False` | Translate transcript.            |
+| `target_language`              | `str`       | `None`  | Target language for translation. |
+| `enable_transliteration`       | `bool`      | `False` | Transliterate transcript.        |
+| `project`                      | `str`       | `None`  | Project name for tracking.       |
 
 #### ASR Parameter Examples
 
@@ -700,17 +741,27 @@ result = await client.asr.transcribe("call.wav", config=config)
 
 **Batch (HTTP)**
 
+The `transcribe()` method accepts multiple input types:
+
 ```python
-# From file path
+# From file path (string)
 result = await client.asr.transcribe("audio.wav", config=TranscriptionConfig(model="zero-indic"))
+result = await client.asr.transcribe("/absolute/path/to/recording.mp3", config=TranscriptionConfig(model="zero-indic"))
+
+# From raw audio bytes (in-memory audio)
+with open("audio.wav", "rb") as f:
+    audio_bytes = f.read()
+result = await client.asr.transcribe(audio_bytes, config=TranscriptionConfig(model="zero-indic"))
 
 # From file object
 with open("audio.wav", "rb") as f:
     result = await client.asr.transcribe_file(f, config=TranscriptionConfig(model="zero-indic"))
 
-# From URL
+# From remote URL
 result = await client.asr.transcribe_url("https://example.com/audio.wav", config=TranscriptionConfig(model="zero-indic"))
 ```
+
+> ⚠ URL inputs must be publicly accessible at the time of the API request. Authenticated or signed URLs with short expiry times may fail.
 
 **Streaming (WebSocket)**
 
@@ -722,13 +773,13 @@ conn = await client.asr.stream(config=StreamingConfig(language="en"))
 
 Configuration for the WebSocket streaming session.
 
-| Parameter | Type | Default | Description |
-|-----------|------|---------|-------------|
-| `language` | `str` | `"auto"` | Language code or `"auto"`. |
-| `sample_rate` | `int` | `16000` | Audio sample rate in Hz. |
-| `dtype` | `str` | `"int16"` | Audio data type (`"int16"`, `"float32"`). |
-| `chunk_size_sec` | `float` | `1.0` | Processing chunk size in seconds. |
-| `silence_threshold_sec` | `float` | `0.5` | Silence duration to trigger segmentation. |
+| Parameter               | Type    | Default   | Description                               |
+| ----------------------- | ------- | --------- | ----------------------------------------- |
+| `language`              | `str`   | `"auto"`  | Language code or `"auto"`.                |
+| `sample_rate`           | `int`   | `16000`   | Audio sample rate in Hz.                  |
+| `dtype`                 | `str`   | `"int16"` | Audio data type (`"int16"`, `"float32"`). |
+| `chunk_size_sec`        | `float` | `1.0`     | Processing chunk size in seconds.         |
+| `silence_threshold_sec` | `float` | `0.5`     | Silence duration to trigger segmentation. |
 
 #### Streaming Parameter Examples
 
@@ -810,13 +861,13 @@ def on_error(msg):
     print(f"Error: {msg.message}")
 ```
 
-| Event | Model | Key Attributes |
-|-------|-------|----------------|
-| `PARTIAL` | `StreamingPartial` | `text`, `language`, `segment_id`, `latency_ms` |
-| `FINAL_SEGMENT` | `StreamingFinalSegment` | `text`, `language`, `segment_id`, `silence_duration_ms` |
-| `FINAL` | `StreamingFinal` | `text`, `language`, `audio_duration_sec`, `inference_time_ms` |
-| `DONE` | `StreamingDone` | `total_segments`, `total_audio_duration_sec` |
-| `ERROR` | `StreamingError` | `message`, `code` |
+| Event           | Model                   | Key Attributes                                                |
+| --------------- | ----------------------- | ------------------------------------------------------------- |
+| `PARTIAL`       | `StreamingPartial`      | `text`, `language`, `segment_id`, `latency_ms`                |
+| `FINAL_SEGMENT` | `StreamingFinalSegment` | `text`, `language`, `segment_id`, `silence_duration_ms`       |
+| `FINAL`         | `StreamingFinal`        | `text`, `language`, `audio_duration_sec`, `inference_time_ms` |
+| `DONE`          | `StreamingDone`         | `total_segments`, `total_audio_duration_sec`                  |
+| `ERROR`         | `StreamingError`        | `message`, `code`                                             |
 
 #### Streaming Connection Methods
 
@@ -832,16 +883,53 @@ conn.session_id                     # Server-assigned session ID
 
 Returned by `transcribe()`.
 
-| Attribute | Type | Description |
-|-----------|------|-------------|
-| `success` | `bool` | Whether transcription succeeded. |
-| `request_id` | `str` | Unique request identifier. |
-| `text` | `str` | Full transcription text. |
-| `segments` | `list[SegmentResult]` | Time-aligned segments (`start`, `end`, `text`). |
-| `detected_language` | `str` | Detected language name (e.g. `"English"`, `"Hindi"`, `"Kannada"`). |
-| `audio_duration` | `float` | Audio duration in seconds. |
-| `inference_time_ms` | `float` | Server inference time in ms. |
-| `nlp_analysis` | `NLPAnalysis` | NLP results (if any `enable_*` flags were set). |
+**Response Schema**
+
+```json
+{
+  "text": "Full transcription of the audio",
+  "detected_language": "English",
+  "segments": [
+    {
+      "start": 0.2,
+      "end": 2.1,
+      "text": "Hello world"
+    },
+    {
+      "start": 2.5,
+      "end": 5.0,
+      "text": "How can I help you today?"
+    }
+  ]
+}
+```
+
+**Accessing Fields**
+
+```python
+result = await client.asr.transcribe("audio.wav", config=TranscriptionConfig(model="zero-indic"))
+
+# Full transcript
+print(result.text)
+
+# Detected language
+print(result.detected_language)
+
+# Iterate timestamped segments
+for segment in result.segments:
+    print(f"[{segment.start:.2f}s → {segment.end:.2f}s]  {segment.text}")
+```
+
+| Attribute           | Type                  | Description                                                        |
+| ------------------- | --------------------- | ------------------------------------------------------------------ |
+| `success`           | `bool`                | Whether transcription succeeded.                                   |
+| `request_id`        | `str`                 | Unique request identifier.                                         |
+| `text`              | `str`                 | Full transcription text.                                           |
+| `segments`          | `list[SegmentResult]` | Time-aligned segments (`start`, `end`, `text`).                    |
+| `detected_language` | `str`                 | Detected language name (e.g. `"English"`, `"Hindi"`, `"Kannada"`). |
+| `audio_duration`    | `float`               | Audio duration in seconds.                                         |
+| `inference_time_ms` | `float`               | Server inference time in ms.                                       |
+| `nlp_analysis`      | `NLPAnalysis`         | NLP results (if any `enable_*` flags were set).                    |
 
 ---
 
@@ -849,17 +937,162 @@ Returned by `transcribe()`.
 
 All exceptions inherit from `ShunyalabsError`.
 
-| Exception | Description |
-|-----------|-------------|
-| `AuthenticationError` | Invalid or missing API key (401). |
-| `PermissionDeniedError` | Insufficient permissions (403). |
-| `NotFoundError` | Resource not found (404). |
-| `RateLimitError` | Rate limit exceeded (429). |
-| `ServerError` | Server-side error (5xx). |
-| `TimeoutError` | Request timed out. |
-| `ConnectionError` | Network connectivity issue. |
-| `TranscriptionError` | ASR-specific error. |
-| `SynthesisError` | TTS-specific error. |
+| Exception               | Description                                    |
+| ----------------------- | ---------------------------------------------- |
+| `AuthenticationError`   | Invalid or missing API key (401).              |
+| `PermissionDeniedError` | Insufficient permissions (403).                |
+| `NotFoundError`         | Resource not found (404).                      |
+| `RateLimitError`        | Rate limit exceeded (429).                     |
+| `ServerError`           | Server-side error (5xx).                       |
+| `TimeoutError`          | Request timed out.                             |
+| `ConnectionError`       | Network connectivity issue.                    |
+| `ConfigurationError`    | Invalid or missing configuration.              |
+| `AudioError`            | Invalid, corrupted, or unsupported audio data. |
+| `SessionError`          | Invalid or expired session state.              |
+| `ConversationError`     | Error returned during conversation flow.       |
+| `TranscriptionError`    | ASR-specific transcription error.              |
+| `SynthesisError`        | TTS-specific synthesis error.                  |
+
+**Exception handling example:**
+
+```python
+from shunyalabs import (
+    ConfigurationError,
+    AuthenticationError,
+    ConnectionError,
+    TranscriptionError,
+    AudioError,
+    SessionError,
+    TimeoutError,
+    ConversationError,
+)
+
+try:
+    result = await client.asr.transcribe("audio.wav", config=TranscriptionConfig(model="zero-indic"))
+    print(result.text)
+
+except ConfigurationError as e:
+    print(f"Invalid configuration: {e}")
+
+except AuthenticationError as e:
+    print(f"Authentication failed: {e}")
+
+except ConnectionError as e:
+    print(f"Unable to connect: {e}")
+
+except TranscriptionError as e:
+    print(f"Transcription processing failed: {e}")
+
+except AudioError as e:
+    print(f"Invalid/unsupported audio: {e}")
+
+except SessionError as e:
+    print(f"Invalid or expired session: {e}")
+
+except TimeoutError as e:
+    print(f"Request timed out: {e}")
+
+except ConversationError as e:
+    print(f"Conversation error: {e}")
+
+except Exception as e:
+    print(f"Unexpected error: {e}")
+```
+
+---
+
+---
+
+## File Duration & Rate Limits
+
+| Limit                  | Value      |
+| ---------------------- | ---------- |
+| Maximum audio duration | 15 minutes |
+| Maximum File size      | 50 MB      |
+| Concurrent requests    | 16         |
+
+> ⚠ For files exceeding the duration limit, split the audio into smaller segments before submitting. Consider using silence-detection tools to identify natural break points.
+
+> ℹ Support for pre-signed URLs for large audio files will be introduced in an upcoming beta release, allowing clients to provide a secure URL instead of uploading directly.
+
+---
+
+## ASR End-to-End Quickstart
+
+A complete integration walkthrough from installation to parsing the response.
+
+### Step 1 — Install the SDK
+
+```bash
+pip install shunyalabs[all]
+```
+
+### Step 2 — Authenticate
+
+```python
+import os
+from shunyalabs import AsyncShunyaClient
+
+client = AsyncShunyaClient(api_key=os.environ.get("SHUNYALABS_API_KEY"))
+```
+
+> ⚠ Store your API key in an environment variable rather than hardcoding it.
+
+### Step 3 — Transcribe Audio
+
+```python
+from shunyalabs.asr import TranscriptionConfig
+
+async with AsyncShunyaClient(api_key=os.environ.get("SHUNYALABS_API_KEY")) as client:
+    result = await client.asr.transcribe(
+        "recording.wav",
+        config=TranscriptionConfig(model="zero-indic"),
+    )
+```
+
+### Step 4 — Parse & Use the Response
+
+```python
+# Full transcript text
+print("Transcript:", result.text)
+
+# Detected language
+print("Language:", result.detected_language)
+
+# Timestamped segments
+for seg in result.segments:
+    print(f"  [{seg.start:.2f}s – {seg.end:.2f}s]  {seg.text}")
+```
+
+### Complete Example
+
+```python
+import asyncio, os
+from shunyalabs import AsyncShunyaClient, AuthenticationError
+from shunyalabs.asr import TranscriptionConfig
+
+async def main():
+    async with AsyncShunyaClient(api_key=os.environ.get("SHUNYALABS_API_KEY")) as client:
+        config = TranscriptionConfig(model="zero-indic")
+        try:
+            result = await client.asr.transcribe("customer_call.wav", config=config)
+
+            print("=== Transcript ===")
+            print(result.text)
+            print()
+            print(f"Detected language: {result.detected_language}")
+            print()
+            print("=== Segments ===")
+            for seg in result.segments:
+                print(f"[{seg.start:.2f}s → {seg.end:.2f}s]  {seg.text}")
+
+        except AuthenticationError as e:
+            print(f"Authentication failed: {e}")
+        except Exception as e:
+            print(f"Error: {e}")
+
+asyncio.run(main())
+```
 
 ---
 
