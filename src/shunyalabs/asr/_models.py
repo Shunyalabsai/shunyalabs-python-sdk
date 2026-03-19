@@ -28,12 +28,14 @@ class TranscriptionConfig(BaseModel):
 
     model: str
     language_code: str = "auto"
-    task: str = "transcribe"
     output_script: str = "auto"
-    use_vad_chunking: bool = True
-    chunk_size: int = 30
+    word_timestamps: bool = False
+
+    # Diarization & speaker ID
     enable_diarization: bool = False
-    enable_denoising: bool = False
+    enable_speaker_identification: bool = False
+    enable_emotion_diarization: bool = False
+    project: Optional[str] = None
 
     # NLP feature flags
     enable_intent_detection: bool = False
@@ -41,27 +43,20 @@ class TranscriptionConfig(BaseModel):
     enable_summarization: bool = False
     summary_max_length: int = 150
     enable_sentiment_analysis: bool = False
-    enable_emotion_diarization: bool = False
+    enable_keyterm_normalization: bool = False
+    keyterm_keywords: Optional[List[str]] = None
 
     # Post-processing
     enable_profanity_hashing: bool = False
     hash_keywords: Optional[List[str]] = None
-    enable_keyterm_normalization: bool = False
-    enable_medical_correction: bool = False
-    enable_translation: bool = False
-    target_language: Optional[str] = None
-    enable_transliteration: bool = False
-    enable_code_switch_correction: bool = False
-    enable_language_identification: bool = False
-
-    # Project / tracking
-    project: Optional[str] = None
+    output_language: Optional[str] = None
 
     def to_form_fields(self) -> Dict[str, str]:
         """Serialise to a flat ``{name: string_value}`` dict for multipart form data.
 
-        JSON-serialisable list fields (``intent_choices``, ``hash_keywords``)
-        are encoded as JSON strings, matching what the gateway expects.
+        JSON-serialisable list fields (``intent_choices``, ``hash_keywords``,
+        ``keyterm_keywords``) are encoded as JSON strings, matching what the
+        gateway expects.
         Boolean values are lowercased (``"true"`` / ``"false"``).
         ``None`` values are omitted.
         """
@@ -81,12 +76,24 @@ class TranscriptionConfig(BaseModel):
 # --- Batch response models ---
 
 
+class WordResult(BaseModel):
+    """A single word with alignment timestamps and confidence score."""
+
+    word: str
+    start: float
+    end: float
+    score: Optional[float] = None
+
+
 class SegmentResult(BaseModel):
     """A single time-aligned segment inside a transcription result."""
 
     start: float
     end: float
     text: str
+    speaker: Optional[str] = None
+    emotion: Optional[str] = None
+    words: Optional[List[WordResult]] = None
 
 
 class NLPAnalysis(BaseModel):
@@ -101,8 +108,7 @@ class NLPAnalysis(BaseModel):
     sentiment: Optional[Dict[str, Any]] = None
     emotion: Optional[Dict[str, Any]] = None
     translation: Optional[Union[str, Dict[str, Any]]] = None
-    transliteration: Optional[Union[str, Dict[str, Any]]] = None
-    language_identification: Optional[Dict[str, Any]] = None
+    normalized_text: Optional[str] = None
 
 
 class TranscriptionResult(BaseModel):
@@ -116,6 +122,7 @@ class TranscriptionResult(BaseModel):
     text: str = ""
     segments: List[SegmentResult] = Field(default_factory=list)
     detected_language: Optional[str] = None
+    speakers: List[str] = Field(default_factory=list)
     audio_duration: Optional[float] = None
     inference_time_ms: Optional[float] = None
     nlp_analysis: Optional[NLPAnalysis] = None
@@ -240,6 +247,7 @@ __all__ = [
     "TranscriptionConfig",
     "TranscriptionResult",
     "SegmentResult",
+    "WordResult",
     "NLPAnalysis",
     # Streaming
     "StreamingConfig",

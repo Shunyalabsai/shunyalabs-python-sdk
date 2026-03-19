@@ -498,36 +498,51 @@ The API supports a range of sample rates to accommodate diverse audio sources in
 
 Configuration for batch transcription. Passed as `config=` to `transcribe()`.
 
-| Parameter            | Type   | Default        | Description                                      |
-| -------------------- | ------ | -------------- | ------------------------------------------------ |
-| `model`              | `str`  | **required**   | Model name (e.g. `"zero-indic"`).                |
-| `language_code`      | `str`  | `"auto"`       | Language code or `"auto"` for auto-detection.    |
-| `task`               | `str`  | `"transcribe"` | Task type (`"transcribe"`).                      |
-| `output_script`      | `str`  | `"auto"`       | Output script (`"auto"`, `"latin"`, `"native"`). |
-| `enable_diarization` | `bool` | `False`        | Enable speaker diarization.                      |
+**Models:**
+
+| Model | Use for |
+|---|---|
+| `zero-indic` | General Indian languages (Hindi, Tamil, Telugu, Kannada, Marathi, Bengali, etc.) |
+| `zero-med` | Medical/clinical audio — auto-applies medical terminology correction |
+| `zero-codeswitch` | Code-switched speech (Hinglish, Tanglish, etc.) — auto-restores mixed text |
+
+**Core Parameters:**
+
+| Parameter            | Type   | Default      | Description                                                              |
+| -------------------- | ------ | ------------ | ------------------------------------------------------------------------ |
+| `model`              | `str`  | **required** | Model name (`"zero-indic"`, `"zero-med"`, `"zero-codeswitch"`).         |
+| `language_code`      | `str`  | `"auto"`     | Language hint — ISO code (`hi`, `ta`, `en`) or name (`Hindi`, `Tamil`). |
+| `output_script`      | `str`  | `"auto"`     | Transliterate output script (`"Latin"`, `"Devanagari"`, `"Tamil"`, etc.). |
+| `word_timestamps`    | `bool` | `False`      | Per-word start/end times and alignment confidence scores.                |
+
+**Diarization & Speaker ID:**
+
+| Parameter                        | Type   | Default | Description                                          |
+| -------------------------------- | ------ | ------- | ---------------------------------------------------- |
+| `enable_diarization`             | `bool` | `False` | Identify who spoke when (`SPEAKER_00`, `SPEAKER_01`). |
+| `enable_speaker_identification`  | `bool` | `False` | Resolve speakers to registered names (requires diarization). |
+| `enable_emotion_diarization`     | `bool` | `False` | Detect dominant emotion per segment.                 |
+| `project`                        | `str`  | `None`  | Speaker library namespace for speaker identification. |
 
 **NLP Features:**
 
-| Parameter                    | Type        | Default | Description                           |
-| ---------------------------- | ----------- | ------- | ------------------------------------- |
-| `enable_intent_detection`    | `bool`      | `False` | Detect intent from transcript.        |
-| `intent_choices`             | `list[str]` | `None`  | Constrain intent to specific choices. |
-| `enable_summarization`       | `bool`      | `False` | Generate transcript summary.          |
-| `summary_max_length`         | `int`       | `150`   | Maximum summary length.               |
-| `enable_sentiment_analysis`  | `bool`      | `False` | Analyze sentiment.                    |
-| `enable_emotion_diarization` | `bool`      | `False` | Detect emotions per segment.          |
+| Parameter                    | Type        | Default | Description                              |
+| ---------------------------- | ----------- | ------- | ---------------------------------------- |
+| `enable_intent_detection`    | `bool`      | `False` | Classify transcript intent via Gemini.   |
+| `intent_choices`             | `list[str]` | `None`  | Constrain to specific intents.           |
+| `enable_summarization`       | `bool`      | `False` | Generate concise summary via Gemini.     |
+| `summary_max_length`         | `int`       | `150`   | Max words in summary.                    |
+| `enable_sentiment_analysis`  | `bool`      | `False` | Sentiment label, score, and explanation. |
+| `enable_keyterm_normalization` | `bool`    | `False` | Normalize domain-specific terms.         |
+| `keyterm_keywords`           | `list[str]` | `None`  | Focus normalization on these terms.      |
 
 **Post-processing:**
 
-| Parameter                      | Type        | Default | Description                      |
-| ------------------------------ | ----------- | ------- | -------------------------------- |
-| `enable_profanity_hashing`     | `bool`      | `False` | Hash profane words.              |
-| `hash_keywords`                | `list[str]` | `None`  | Custom keywords to hash.         |
-| `enable_keyterm_normalization` | `bool`      | `False` | Normalize key terms.             |
-| `enable_translation`           | `bool`      | `False` | Translate transcript.            |
-| `target_language`              | `str`       | `None`  | Target language for translation. |
-| `enable_transliteration`       | `bool`      | `False` | Transliterate transcript.        |
-| `project`                      | `str`       | `None`  | Project name for tracking.       |
+| Parameter                  | Type        | Default | Description                                       |
+| -------------------------- | ----------- | ------- | ------------------------------------------------- |
+| `enable_profanity_hashing` | `bool`      | `False` | Mask profanity with `****`.                       |
+| `hash_keywords`            | `list[str]` | `None`  | Mask specific words/phrases with `****` (regex).  |
+| `output_language`          | `str`       | `None`  | Translate transcript to this language (`"en"`, `"hi"`, etc.). |
 
 #### ASR Parameter Examples
 
@@ -543,71 +558,116 @@ print(f"Detected: {result.detected_language}")
 #   "Hello, how are you doing today?"
 #   Detected: English
 
-# Specify language for better accuracy
+# Specify language for better accuracy on short clips
 config = TranscriptionConfig(model="zero-indic", language_code="hi")
 result = await client.asr.transcribe("hindi_audio.wav", config=config)
 print(result.text)
 # Output: "नमस्ते, आप कैसे हैं?"
+
+# Medical audio — auto-applies medical terminology correction
+config = TranscriptionConfig(model="zero-med", language_code="en")
+
+# Code-switched speech (Hinglish, Tanglish, etc.)
+config = TranscriptionConfig(model="zero-codeswitch")
 ```
 
-**`output_script` — Control output script**
+**`output_script` — Transliterate output to a different script**
 
-Values: `"auto"`, `"latin"`, `"native"`
+Uses [aksharamukha](https://aksharamukha.appspot.com/) — no LLM involved.
+
+Common values: `"auto"`, `"Latin"`, `"Devanagari"`, `"Bengali"`, `"Telugu"`, `"Tamil"`, `"Kannada"`, `"ITRANS"`
 
 ```python
-# Native script (default for auto)
-config = TranscriptionConfig(model="zero-indic", language_code="hi", output_script="native")
+# Latin/Roman script — romanised output
+config = TranscriptionConfig(model="zero-indic", language_code="hi", output_script="Latin")
 result = await client.asr.transcribe("hindi_audio.wav", config=config)
 print(result.text)
-# Output: "नमस्ते, आप कैसे हैं?"
+# Output: "namaste mohammad ji ye ek zaruri call hai"
 
-# Latin/Roman script — transliterated output
-config = TranscriptionConfig(model="zero-indic", language_code="hi", output_script="latin")
-result = await client.asr.transcribe("hindi_audio.wav", config=config)
-print(result.text)
-# Output: "namaste, aap kaise hain?"
-
-# Auto — server decides based on language
+# Auto (default) — no transliteration
 config = TranscriptionConfig(model="zero-indic", output_script="auto")
 ```
 
-**`enable_diarization` — Speaker identification**
+**`word_timestamps` — Per-word timing and confidence**
+
+```python
+config = TranscriptionConfig(model="zero-indic", word_timestamps=True)
+result = await client.asr.transcribe("audio.wav", config=config)
+for seg in result.segments:
+    if seg.words:
+        for w in seg.words:
+            print(f"  {w.word}  [{w.start:.3f}s - {w.end:.3f}s]  score={w.score}")
+# Output:
+#   नमस्ते  [0.532s - 0.932s]  score=-4.237
+#   मोहम्मद  [1.012s - 1.412s]  score=-6.226
+```
+
+> **Note on `score`:** Log-probability from the alignment model — more negative means lower confidence. Values above `-5` are generally reliable.
+
+**`enable_diarization` — Who spoke when**
 
 ```python
 config = TranscriptionConfig(model="zero-indic", enable_diarization=True)
-result = await client.asr.transcribe("meeting.wav", config=config)
+result = await client.asr.transcribe("call.wav", config=config)
+print(result.speakers)  # ["SPEAKER_00", "SPEAKER_01"]
 for seg in result.segments:
-    print(f"  [{seg.start:.1f}s - {seg.end:.1f}s] {seg.text}")
+    print(f"  [{seg.speaker}] [{seg.start:.1f}s - {seg.end:.1f}s] {seg.text}")
 # Output:
-#   [0.0s - 3.2s] [Speaker 1] Good morning, let's begin the meeting.
-#   [3.5s - 6.8s] [Speaker 2] Sure, I have the report ready.
-#   [7.0s - 10.1s] [Speaker 1] Great, please go ahead.
+#   [SPEAKER_00] [0.5s - 3.2s] नमस्ते, आप कैसे हैं
+#   [SPEAKER_01] [4.1s - 6.8s] मैं ठीक हूँ धन्यवाद
 ```
 
-**`enable_intent_detection` + `intent_choices` — Detect user intent**
+**`enable_speaker_identification` + `project` — Resolve to registered names**
+
+Requires `enable_diarization=True` and pre-registered voice profiles (see Speaker APIs).
 
 ```python
-# Open intent detection
 config = TranscriptionConfig(
     model="zero-indic",
-    enable_intent_detection=True,
+    enable_diarization=True,
+    enable_speaker_identification=True,
+    project="support_team",
 )
-result = await client.asr.transcribe("customer_call.wav", config=config)
-print(result.text)
-print(result.nlp_analysis.intent)
+result = await client.asr.transcribe("call.wav", config=config)
+print(result.speakers)  # ["Priya", "Rahul"]
+for seg in result.segments:
+    print(f"  [{seg.speaker}] {seg.text}")
 # Output:
-#   "I want to cancel my subscription"
-#   {"label": "cancellation", "confidence": 0.94}
+#   [Priya] नमस्ते, आप कैसे हैं
+#   [Rahul] मैं ठीक हूँ
+```
 
-# Constrained intent — pick from specific choices
+**`enable_emotion_diarization` — Emotion per segment**
+
+```python
+config = TranscriptionConfig(
+    model="zero-indic",
+    enable_diarization=True,
+    enable_emotion_diarization=True,
+)
+result = await client.asr.transcribe("call.wav", config=config)
+for seg in result.segments:
+    print(f"  [{seg.speaker}] ({seg.emotion}) {seg.text}")
+# Output:
+#   [SPEAKER_00] (angry) I've been waiting for an hour!
+#   [SPEAKER_01] (neutral) I'm sorry about that, let me help.
+```
+
+**`enable_intent_detection` + `intent_choices` — Classify intent**
+
+```python
+# Constrained to specific choices
 config = TranscriptionConfig(
     model="zero-indic",
     enable_intent_detection=True,
-    intent_choices=["booking", "cancellation", "complaint", "inquiry"],
+    intent_choices=["complaint", "inquiry", "service_request", "compliment"],
 )
 result = await client.asr.transcribe("customer_call.wav", config=config)
 print(result.nlp_analysis.intent)
-# Output: {"label": "cancellation", "confidence": 0.97}
+# Output: {"label": "service_request", "confidence": 0.92, "reasoning": "Caller is requesting roadside assistance"}
+
+# Open intent — no constraints
+config = TranscriptionConfig(model="zero-indic", enable_intent_detection=True)
 ```
 
 **`enable_summarization` + `summary_max_length` — Summarize transcript**
@@ -616,125 +676,65 @@ print(result.nlp_analysis.intent)
 config = TranscriptionConfig(
     model="zero-indic",
     enable_summarization=True,
-    summary_max_length=100,  # max 100 characters
+    summary_max_length=50,  # max ~50 words
 )
-result = await client.asr.transcribe("meeting_recording.wav", config=config)
-print(f"Full transcript: {result.text[:80]}...")
-print(f"Summary: {result.nlp_analysis.summary}")
-# Output:
-#   Full transcript: Good morning everyone. Today we'll review Q3 results. Revenue grew by...
-#   Summary: Q3 review meeting covering revenue growth, cost optimization, and next quarter targets.
+result = await client.asr.transcribe("meeting.wav", config=config)
+print(result.nlp_analysis.summary)
+# Output: "Customer called about a vehicle breakdown. Agent confirmed the complaint and promised a technician within the hour."
 ```
 
 **`enable_sentiment_analysis` — Detect sentiment**
 
 ```python
-config = TranscriptionConfig(
-    model="zero-indic",
-    enable_sentiment_analysis=True,
-)
+config = TranscriptionConfig(model="zero-indic", enable_sentiment_analysis=True)
 result = await client.asr.transcribe("feedback.wav", config=config)
-print(result.text)
 print(result.nlp_analysis.sentiment)
-# Output:
-#   "The product is amazing, I absolutely love it!"
-#   {"label": "positive", "score": {"positive": 0.96, "negative": 0.02, "neutral": 0.02}}
+# Output: {"label": "negative", "score": -0.72, "explanation": "Customer expresses frustration about..."}
 ```
 
-**`enable_emotion_diarization` — Detect emotions per segment**
-
-```python
-config = TranscriptionConfig(
-    model="zero-indic",
-    enable_emotion_diarization=True,
-)
-result = await client.asr.transcribe("conversation.wav", config=config)
-print(result.nlp_analysis.emotion)
-# Output:
-#   {"segments": [
-#     {"start": 0.0, "end": 3.2, "emotion": "neutral", "text": "Hello, how can I help?"},
-#     {"start": 3.5, "end": 7.1, "emotion": "angry", "text": "I've been waiting for an hour!"},
-#     {"start": 7.4, "end": 10.0, "emotion": "empathetic", "text": "I'm sorry about that."}
-#   ]}
-```
-
-**`enable_profanity_hashing` + `hash_keywords` — Redact sensitive words**
-
-```python
-# Hash common profanity
-config = TranscriptionConfig(
-    model="zero-indic",
-    enable_profanity_hashing=True,
-)
-result = await client.asr.transcribe("audio.wav", config=config)
-print(result.text)
-# Output: "What the #### is going on?"
-
-# Hash custom keywords (e.g., names, account numbers)
-config = TranscriptionConfig(
-    model="zero-indic",
-    enable_profanity_hashing=True,
-    hash_keywords=["John", "Acme Corp", "Project Alpha"],
-)
-result = await client.asr.transcribe("meeting.wav", config=config)
-print(result.text)
-# Output: "#### from ######### said ############# is on track."
-```
-
-**`enable_translation` + `target_language` — Translate transcript**
-
-```python
-config = TranscriptionConfig(
-    model="zero-indic",
-    language_code="hi",
-    enable_translation=True,
-    target_language="en",
-)
-result = await client.asr.transcribe("hindi_audio.wav", config=config)
-print(f"Original: {result.text}")
-print(f"Translation: {result.nlp_analysis.translation}")
-# Output:
-#   Original: नमस्ते, आज मौसम बहुत अच्छा है।
-#   Translation: Hello, the weather is very nice today.
-```
-
-**`enable_transliteration` — Transliterate to Latin script**
-
-```python
-config = TranscriptionConfig(
-    model="zero-indic",
-    language_code="hi",
-    enable_transliteration=True,
-)
-result = await client.asr.transcribe("hindi_audio.wav", config=config)
-print(f"Native: {result.text}")
-print(f"Transliterated: {result.nlp_analysis.transliteration}")
-# Output:
-#   Native: नमस्ते, आज मौसम बहुत अच्छा है।
-#   Transliterated: namaste, aaj mausam bahut achha hai.
-```
-
-**`enable_keyterm_normalization` — Normalize domain terms**
+**`enable_keyterm_normalization` + `keyterm_keywords` — Fix domain terms**
 
 ```python
 config = TranscriptionConfig(
     model="zero-indic",
     enable_keyterm_normalization=True,
+    keyterm_keywords=["EMI", "NACH mandate", "bounce charge"],
 )
-result = await client.asr.transcribe("tech_audio.wav", config=config)
-print(result.text)
-# Output: "The API returns JSON over HTTPS." (normalized from "A P I", "jay son", "H T T P S")
+result = await client.asr.transcribe("finance_call.wav", config=config)
+print(result.nlp_analysis.normalized_text)
+# Output: "आपकी EMI की तारीख पाँच अगस्त है" (normalized from "emi")
 ```
 
-**`project` — Tag requests for tracking**
+**`enable_profanity_hashing` + `hash_keywords` — Redact sensitive words**
+
+```python
+# Mask profanity
+config = TranscriptionConfig(model="zero-indic", enable_profanity_hashing=True)
+result = await client.asr.transcribe("audio.wav", config=config)
+# Output: "अरे **** यह काम क्यों नहीं हो रहा"
+
+# Mask specific keywords (regex, case-insensitive, no LLM)
+config = TranscriptionConfig(
+    model="zero-indic",
+    hash_keywords=["account number", "card number", "OTP"],
+)
+result = await client.asr.transcribe("call.wav", config=config)
+# Output: "आपका **** 4321 है और आपका **** कल भेजा गया था"
+```
+
+**`output_language` — Translate transcript**
 
 ```python
 config = TranscriptionConfig(
     model="zero-indic",
-    project="customer-support-q1",
+    language_code="hi",
+    output_language="en",
 )
-result = await client.asr.transcribe("call.wav", config=config)
-# Request is tagged with project name for usage tracking and analytics
+result = await client.asr.transcribe("hindi_audio.wav", config=config)
+print(result.text)
+# Output: "Hello, this is an urgent call regarding your vehicle service."
+print(result.nlp_analysis.translation)
+# Also available in nlp_analysis
 ```
 
 #### ASR Methods
@@ -887,20 +887,32 @@ Returned by `transcribe()`.
 
 ```json
 {
-  "text": "Full transcription of the audio",
-  "detected_language": "English",
+  "success": true,
+  "request_id": "a1b2c3...",
+  "text": "[Priya] नमस्ते मेरी गाड़ी खराब हो गई है [Rahul] ठीक है मैं आपकी मदद करता हूँ",
   "segments": [
     {
-      "start": 0.2,
-      "end": 2.1,
-      "text": "Hello world"
-    },
-    {
-      "start": 2.5,
-      "end": 5.0,
-      "text": "How can I help you today?"
+      "start": 0.5,
+      "end": 4.2,
+      "text": "नमस्ते मेरी गाड़ी खराब हो गई है",
+      "speaker": "Priya",
+      "emotion": "sad",
+      "words": [
+        { "word": "नमस्ते", "start": 0.53, "end": 0.93, "score": -4.2 }
+      ]
     }
-  ]
+  ],
+  "detected_language": "hindi",
+  "speakers": ["Priya", "Rahul"],
+  "audio_duration": 9.1,
+  "inference_time_ms": 3241.5,
+  "nlp_analysis": {
+    "intent": { "label": "service_request", "confidence": 0.95, "reasoning": "..." },
+    "summary": "Customer reported a vehicle breakdown. Agent offered assistance.",
+    "sentiment": { "label": "negative", "score": -0.6, "explanation": "..." },
+    "normalized_text": "...",
+    "translation": "..."
+  }
 }
 ```
 
@@ -915,21 +927,63 @@ print(result.text)
 # Detected language
 print(result.detected_language)
 
+# Speakers (when diarization is enabled)
+print(result.speakers)  # ["SPEAKER_00", "SPEAKER_01"] or ["Priya", "Rahul"]
+
 # Iterate timestamped segments
-for segment in result.segments:
-    print(f"[{segment.start:.2f}s → {segment.end:.2f}s]  {segment.text}")
+for seg in result.segments:
+    speaker = f"[{seg.speaker}] " if seg.speaker else ""
+    emotion = f"({seg.emotion}) " if seg.emotion else ""
+    print(f"{speaker}{emotion}[{seg.start:.2f}s → {seg.end:.2f}s]  {seg.text}")
+
+    # Per-word timestamps (when word_timestamps=True)
+    if seg.words:
+        for w in seg.words:
+            print(f"    {w.word} [{w.start:.3f}s-{w.end:.3f}s] score={w.score}")
 ```
 
 | Attribute           | Type                  | Description                                                        |
 | ------------------- | --------------------- | ------------------------------------------------------------------ |
 | `success`           | `bool`                | Whether transcription succeeded.                                   |
 | `request_id`        | `str`                 | Unique request identifier.                                         |
-| `text`              | `str`                 | Full transcription text.                                           |
-| `segments`          | `list[SegmentResult]` | Time-aligned segments (`start`, `end`, `text`).                    |
-| `detected_language` | `str`                 | Detected language name (e.g. `"English"`, `"Hindi"`, `"Kannada"`). |
+| `text`              | `str`                 | Full transcription text (prefixed with `[SPEAKER_XX]` when diarized). |
+| `segments`          | `list[SegmentResult]` | Time-aligned segments (see below).                                 |
+| `detected_language` | `str`                 | Detected language name (e.g. `"hindi"`, `"English"`).              |
+| `speakers`          | `list[str]`           | Unique speaker labels (empty when diarization is off).             |
 | `audio_duration`    | `float`               | Audio duration in seconds.                                         |
 | `inference_time_ms` | `float`               | Server inference time in ms.                                       |
 | `nlp_analysis`      | `NLPAnalysis`         | NLP results (if any `enable_*` flags were set).                    |
+
+#### `SegmentResult`
+
+| Attribute | Type              | Description                                          |
+| --------- | ----------------- | ---------------------------------------------------- |
+| `start`   | `float`           | Segment start time in seconds.                       |
+| `end`     | `float`           | Segment end time in seconds.                         |
+| `text`    | `str`             | Transcribed text for this segment.                   |
+| `speaker` | `str` or `None`   | Speaker label (when diarization is enabled).         |
+| `emotion` | `str` or `None`   | Emotion label (when emotion diarization is enabled). |
+| `words`   | `list[WordResult]` or `None` | Per-word timestamps (when `word_timestamps=True`). |
+
+#### `WordResult`
+
+| Attribute | Type    | Description                                          |
+| --------- | ------- | ---------------------------------------------------- |
+| `word`    | `str`   | The word.                                            |
+| `start`   | `float` | Word start time in seconds.                          |
+| `end`     | `float` | Word end time in seconds.                            |
+| `score`   | `float` or `None` | Log-probability confidence (more negative = less confident). |
+
+#### `NLPAnalysis`
+
+| Attribute          | Type   | Description                                    |
+| ------------------ | ------ | ---------------------------------------------- |
+| `intent`           | `dict` | Intent label, confidence, reasoning.           |
+| `summary`          | `str`  | Transcript summary.                            |
+| `sentiment`        | `dict` | Sentiment label, score, explanation.           |
+| `emotion`          | `dict` | Emotion detection results.                     |
+| `translation`      | `str`  | Translated text (when `output_language` is set). |
+| `normalized_text`  | `str`  | Text with normalized key terms.                |
 
 ---
 
@@ -1073,18 +1127,27 @@ from shunyalabs.asr import TranscriptionConfig
 
 async def main():
     async with AsyncShunyaClient(api_key=os.environ.get("SHUNYALABS_API_KEY")) as client:
-        config = TranscriptionConfig(model="zero-indic")
+        config = TranscriptionConfig(
+            model="zero-indic",
+            enable_diarization=True,
+            word_timestamps=True,
+            enable_sentiment_analysis=True,
+        )
         try:
             result = await client.asr.transcribe("customer_call.wav", config=config)
 
             print("=== Transcript ===")
             print(result.text)
-            print()
             print(f"Detected language: {result.detected_language}")
+            print(f"Speakers: {result.speakers}")
             print()
             print("=== Segments ===")
             for seg in result.segments:
-                print(f"[{seg.start:.2f}s → {seg.end:.2f}s]  {seg.text}")
+                speaker = f"[{seg.speaker}] " if seg.speaker else ""
+                print(f"{speaker}[{seg.start:.2f}s → {seg.end:.2f}s]  {seg.text}")
+
+            if result.nlp_analysis and result.nlp_analysis.sentiment:
+                print(f"\nSentiment: {result.nlp_analysis.sentiment}")
 
         except AuthenticationError as e:
             print(f"Authentication failed: {e}")
