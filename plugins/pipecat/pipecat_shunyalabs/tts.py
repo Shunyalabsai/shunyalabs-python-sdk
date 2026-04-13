@@ -62,11 +62,10 @@ class ShunyalabsTTSService(TTSService):
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
         url: WebSocket endpoint URL.
-        model: TTS model name (e.g. ``"zero-indic"``).
-        voice: Speaker voice name (e.g. ``"Rajesh"``, ``"Varun"``).
-        speaker: Speaker name prefix for text formatting (e.g. ``"Rajesh"``).
-        style: Emotion style tag (e.g. ``"<Happy>"``).
-        language: Language code for transliteration (e.g. ``"en"``, ``"hi"``).
+        voice: Speaker voice name (e.g. ``"Rajesh"``, ``"Nisha"``).
+        style: Emotion style tag (e.g. ``"<Happy>"``). Prepended to text.
+            The gateway adds the speaker prefix and a default style automatically.
+        language: ISO 639 language code (e.g. ``"en"``, ``"hi"``). Required.
         output_format: Audio format (default ``"pcm"``).
         speed: Speaking speed multiplier (0.5-2.0).
         **kwargs: Forwarded to ``TTSService.__init__``.
@@ -79,8 +78,7 @@ class ShunyalabsTTSService(TTSService):
         url: str = _DEFAULT_WS_URL,
         model: str = "zero-indic",
         voice: str = "Rajesh",
-        speaker: str = "Rajesh",
-        style: str = "<Neutral>",
+        style: Optional[str] = None,
         language: str = "en",
         sample_rate: int = 16000,
         output_format: str = "pcm",
@@ -99,7 +97,6 @@ class ShunyalabsTTSService(TTSService):
         self._ws_url = url
         self._model = model
         self._voice = voice
-        self._speaker = speaker
         self._style = style
         self._language = language
         self._sample_rate = sample_rate
@@ -108,7 +105,10 @@ class ShunyalabsTTSService(TTSService):
         self._auth = StaticKeyAuth(self._api_key)
 
     def _format_text(self, text: str) -> str:
-        return f"{self._speaker}: {self._style} {text}"
+        """Prepend style tag if set. The gateway handles the speaker prefix
+        and a default <Conversational> style internally — so we don't.
+        """
+        return f"{self._style} {text}" if self._style else text
 
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""

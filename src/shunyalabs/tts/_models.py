@@ -12,7 +12,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 
 # ---------------------------------------------------------------------------
@@ -40,35 +40,41 @@ class OutputFormat(str, Enum):
 # ---------------------------------------------------------------------------
 
 class TTSConfig(BaseModel):
-    """Configuration for a TTS synthesis request (OpenAI-compatible).
+    """Configuration for a TTS synthesis request.
 
-    All fields are optional.  When passed to a synthesis method the values
-    are merged into the gateway ``TTSRequestSchema`` JSON body alongside
-    the ``input`` text supplied by the caller.  Authentication is handled
-    via the ``Authorization: Bearer`` header.
+    Required: ``model``, ``language``, and either ``voice`` or ``reference_wav``.
+    Authentication is handled via the ``Authorization: Bearer`` header.
 
     Attributes:
-        model: Model name (default ``"zero-indic"``).
-        voice: Speaker voice name (e.g. ``"Varun"``, ``"Nisha"``).
-        response_format: Output audio format (default ``"mp3"``).
+        model: Model name. Must be ``"zero-indic"``.
+        language: ISO 639-1/639-2 language code (2--3 chars). Required.
+        voice: Speaker voice name (e.g. ``"Varun"``, ``"Nisha"``). Required
+            unless ``reference_wav`` is provided.
+        response_format: Output audio format (default ``"wav"``).
         speed: Speaking speed multiplier (0.25--4.0).
-        language: ISO 639-1/639-2 language code (2--3 chars).
         trim_silence: Strip leading/trailing silence from audio.
-        volume_normalization: ``"peak"`` or ``"loudness"``, or *None*.
+        word_timestamps: Return word-level timing data (batch mode only).
         background_audio: Preset name or base64-encoded background audio.
         background_volume: Background volume relative to speech (0.0--1.0).
-        max_tokens: Maximum tokens for LLM generation (1--8192).
         reference_wav: Base64-encoded reference audio for voice cloning.
-        reference_text: Transcript of the reference audio.
+        reference_text: Transcript of the reference audio. Requires
+            ``reference_wav``.
     """
 
     model: str = Field(
         default="zero-indic",
-        description="Model name (e.g. 'zero-indic').",
+        description="Model name (default 'zero-indic').",
+    )
+    language: str = Field(
+        ...,
+        min_length=2,
+        max_length=3,
+        description="ISO 639-1/639-2 language code (e.g. 'en', 'hi', 'ta').",
     )
     voice: Optional[str] = Field(
         default=None,
-        description="Speaker voice name (e.g. 'Varun', 'Nisha', 'Rajesh').",
+        description="Speaker voice name (e.g. 'Varun', 'Nisha', 'Rajesh'). "
+                    "Required unless reference_wav is provided.",
     )
     response_format: Optional[OutputFormat] = Field(
         OutputFormat.WAV,
@@ -80,12 +86,6 @@ class TTSConfig(BaseModel):
         le=4.0,
         description="Speaking speed multiplier.",
     )
-    language: Optional[str] = Field(
-        None,
-        min_length=2,
-        max_length=3,
-        description="ISO 639-1/639-2 language code.",
-    )
     trim_silence: Optional[bool] = Field(
         False,
         description="Trim leading/trailing silence.",
@@ -93,10 +93,6 @@ class TTSConfig(BaseModel):
     word_timestamps: Optional[bool] = Field(
         False,
         description="Include word-level timing data in the response.",
-    )
-    volume_normalization: Optional[str] = Field(
-        None,
-        description="Volume normalization mode: 'peak' or 'loudness'.",
     )
     background_audio: Optional[str] = Field(
         None,
@@ -108,20 +104,26 @@ class TTSConfig(BaseModel):
         le=1.0,
         description="Background audio volume relative to speech.",
     )
-    max_tokens: int = Field(
-        2048,
-        ge=1,
-        le=8192,
-        description="Maximum tokens for LLM generation.",
-    )
     reference_wav: Optional[str] = Field(
         None,
         description="Base64-encoded reference audio for voice cloning.",
     )
     reference_text: Optional[str] = Field(
         "",
-        description="Transcript of the reference audio.",
+        description="Transcript of the reference audio. Requires reference_wav.",
     )
+
+    @model_validator(mode="after")
+    def _validate_voice_or_reference(self):
+        if not self.voice and not self.reference_wav:
+            raise ValueError(
+                "Either 'voice' or 'reference_wav' must be provided."
+            )
+        if self.reference_text and not self.reference_wav:
+            raise ValueError(
+                "'reference_text' requires 'reference_wav' to be provided."
+            )
+        return self
 
     def to_request_payload(
         self,

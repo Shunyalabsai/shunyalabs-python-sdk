@@ -26,16 +26,32 @@ class TestOutputFormat:
 
 class TestTTSConfig:
     def test_defaults(self):
-        config = TTSConfig()
+        # `language` and (`voice` or `reference_wav`) are required
+        config = TTSConfig(language="en", voice="Rajesh")
         assert config.model == "zero-indic"
-        assert config.voice is None
+        assert config.voice == "Rajesh"
+        assert config.language == "en"
         assert config.response_format == OutputFormat.WAV
         assert config.speed == 1.0
-        assert config.max_tokens == 2048
         assert config.word_timestamps is False
 
+    def test_language_required(self):
+        import pytest
+        with pytest.raises(Exception):
+            TTSConfig(voice="Rajesh")
+
+    def test_voice_or_reference_wav_required(self):
+        import pytest
+        with pytest.raises(Exception):
+            TTSConfig(language="en")
+
+    def test_reference_wav_alone_is_valid(self):
+        config = TTSConfig(language="en", reference_wav="abc")
+        assert config.voice is None
+        assert config.reference_wav == "abc"
+
     def test_to_request_payload_basic(self):
-        config = TTSConfig()
+        config = TTSConfig(language="en", voice="Rajesh")
         payload = config.to_request_payload(text="Hello")
         assert payload["input"] == "Hello"
         assert payload["request_type"] == "batch"
@@ -43,7 +59,7 @@ class TestTTSConfig:
         assert payload["response_format"] == "wav"
 
     def test_to_request_payload_streaming(self):
-        config = TTSConfig()
+        config = TTSConfig(language="en", voice="Rajesh")
         payload = config.to_request_payload(
             text="Hi",
             request_type="streaming",
@@ -64,13 +80,13 @@ class TestTTSConfig:
         assert payload["voice"] == "Nisha"
 
     def test_none_fields_omitted(self):
-        config = TTSConfig()
+        config = TTSConfig(language="en", voice="Rajesh")
         payload = config.to_request_payload(text="t")
         # reference_wav is None by default, should not be in payload
         assert "reference_wav" not in payload
 
     def test_word_timestamps_in_payload(self):
-        config = TTSConfig(word_timestamps=True)
+        config = TTSConfig(language="en", voice="Rajesh", word_timestamps=True)
         payload = config.to_request_payload(text="hello")
         assert payload["word_timestamps"] is True
 

@@ -60,9 +60,10 @@ class TTS(tts.TTS):
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
         ws_url: WebSocket streaming endpoint URL.
-        speaker: Speaker name (e.g. ``"Rajesh"``). Used for voice selection via ``TTSConfig``.
-        style: Emotion style tag (e.g. ``"<Happy>"``). Inserted between speaker and text.
-        language: Language code for transliteration (e.g. ``"en"``, ``"hi"``).
+        voice: Speaker voice name (e.g. ``"Rajesh"``, ``"Nisha"``).
+        style: Emotion style tag (e.g. ``"<Happy>"``). Prepended to text.
+            The gateway handles the speaker prefix and default style internally.
+        language: ISO 639 language code (e.g. ``"en"``, ``"hi"``). Required.
         sample_rate: Output sample rate (default 16000).
         output_format: Audio format (``"pcm"``, ``"wav"``, ``"mp3"``).
         speed: Speaking speed multiplier (0.5-2.0).
@@ -76,8 +77,7 @@ class TTS(tts.TTS):
         ws_url: str = _DEFAULT_WS_URL,
         model: str = "zero-indic",
         voice: str = "Rajesh",
-        speaker: str = "Rajesh",
-        style: str = "<Neutral>",
+        style: Optional[str] = None,
         language: str = "en",
         sample_rate: int = 16000,
         output_format: str = "pcm",
@@ -97,7 +97,6 @@ class TTS(tts.TTS):
         self._ws_url = ws_url
         self._model = model
         self._voice = voice
-        self._speaker = speaker
         self._style = style
         self._language = language
         self._output_format = output_format
@@ -113,8 +112,10 @@ class TTS(tts.TTS):
         return "shunyalabs"
 
     def _format_text(self, text: str) -> str:
-        """Format text with style tag."""
-        return f"{self._style} {text}"
+        """Prepend the style tag if set. The gateway adds the speaker
+        prefix and a default <Conversational> style if none is present.
+        """
+        return f"{self._style} {text}" if self._style else text
 
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""
