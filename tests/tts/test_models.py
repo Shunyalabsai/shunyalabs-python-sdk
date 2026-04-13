@@ -12,7 +12,6 @@ from shunyalabs.tts._models import (
     TTSCompletion,
     TTSConfig,
     TTSResult,
-    WordTimestamp,
 )
 
 
@@ -28,26 +27,25 @@ class TestOutputFormat:
 class TestTTSConfig:
     def test_defaults(self):
         config = TTSConfig()
-        assert config.output_format == OutputFormat.PCM
+        assert config.model == "zero-indic"
+        assert config.voice is None
+        assert config.response_format == OutputFormat.WAV
         assert config.speed == 1.0
         assert config.max_tokens == 2048
+        assert config.word_timestamps is False
 
     def test_to_request_payload_basic(self):
         config = TTSConfig()
-        payload = config.to_request_payload(
-            api_key="test-key",
-            target_text="Hello",
-        )
-        assert payload["api_key"] == "test-key"
-        assert payload["target_text"] == "Hello"
+        payload = config.to_request_payload(text="Hello")
+        assert payload["input"] == "Hello"
         assert payload["request_type"] == "batch"
-        assert payload["output_format"] == "pcm"
+        assert payload["model"] == "zero-indic"
+        assert payload["response_format"] == "wav"
 
     def test_to_request_payload_streaming(self):
         config = TTSConfig()
         payload = config.to_request_payload(
-            api_key="key",
-            target_text="Hi",
+            text="Hi",
             request_type="streaming",
         )
         assert payload["request_type"] == "streaming"
@@ -55,21 +53,26 @@ class TestTTSConfig:
     def test_custom_config(self):
         config = TTSConfig(
             language="en",
-            output_format=OutputFormat.WAV,
+            response_format=OutputFormat.WAV,
             speed=1.5,
-            speaker_id="sarah",
+            voice="Nisha",
         )
-        payload = config.to_request_payload(api_key="k", target_text="test")
+        payload = config.to_request_payload(text="test")
         assert payload["language"] == "en"
-        assert payload["output_format"] == "wav"
+        assert payload["response_format"] == "wav"
         assert payload["speed"] == 1.5
-        assert payload["speaker_id"] == "sarah"
+        assert payload["voice"] == "Nisha"
 
     def test_none_fields_omitted(self):
         config = TTSConfig()
-        payload = config.to_request_payload(api_key="k", target_text="t")
+        payload = config.to_request_payload(text="t")
         # reference_wav is None by default, should not be in payload
         assert "reference_wav" not in payload
+
+    def test_word_timestamps_in_payload(self):
+        config = TTSConfig(word_timestamps=True)
+        payload = config.to_request_payload(text="hello")
+        assert payload["word_timestamps"] is True
 
 
 class TestTTSResult:
@@ -124,8 +127,8 @@ class TestTTSResult:
         }
         result = TTSResult.from_api_response(data)
         assert len(result.word_timestamps) == 2
-        assert result.word_timestamps[0].word == "hello"
-        assert result.word_timestamps[1].start == 0.5
+        assert result.word_timestamps[0]["word"] == "hello"
+        assert result.word_timestamps[1]["start"] == 0.5
 
 
 class TestTTSChunk:

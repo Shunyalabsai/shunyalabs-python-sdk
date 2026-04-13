@@ -87,7 +87,7 @@ class WsTransport:
             return
 
         url_with_params = self._prepare_url()
-        self._logger.debug("Connecting to WebSocket: %s", url_with_params)
+        self._logger.debug("Connecting to WebSocket: %s", self._url.split("?")[0])
 
         headers = {}
         if ws_headers:

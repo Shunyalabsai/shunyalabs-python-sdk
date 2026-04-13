@@ -12,10 +12,13 @@ standard file upload.
 
 from __future__ import annotations
 
+import io
 import os
-from io import IOBase
+import shutil
+import subprocess
 from pathlib import Path
-from typing import Any, BinaryIO, Dict, Optional, Union
+from typing import Any, BinaryIO, Dict, Optional, Tuple, Union
+from urllib.parse import urlparse
 
 from shunyalabs._core._auth import StaticKeyAuth
 from shunyalabs._core._exceptions import (
@@ -55,6 +58,77 @@ def _guess_content_type(filename: str) -> str:
         ".wma": "audio/x-ms-wma",
         ".opus": "audio/opus",
     }.get(ext, "application/octet-stream")
+
+
+MAX_AUDIO_SIZE = 500 * 1024 * 1024  # 500 MB
+
+_BLOCKED_HOSTS = frozenset({
+    "localhost", "127.0.0.1", "0.0.0.0", "::1",
+    "169.254.169.254",  # cloud metadata endpoint
+    "metadata.google.internal",
+})
+
+_PRIVATE_PREFIXES = ("10.", "192.168.", "172.16.", "172.17.", "172.18.",
+                     "172.19.", "172.20.", "172.21.", "172.22.", "172.23.",
+                     "172.24.", "172.25.", "172.26.", "172.27.", "172.28.",
+                     "172.29.", "172.30.", "172.31.")
+
+
+def _validate_audio_url(url: str) -> None:
+    """Validate that a URL is safe for server-side fetch (anti-SSRF)."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise ConfigurationError(
+            f"Invalid URL scheme '{parsed.scheme}': only http and https are allowed"
+        )
+    host = (parsed.hostname or "").lower()
+    if not host:
+        raise ConfigurationError("Invalid URL: no hostname")
+    if host in _BLOCKED_HOSTS:
+        raise ConfigurationError(f"URLs pointing to internal addresses are not allowed: {host}")
+    if host.startswith(_PRIVATE_PREFIXES):
+        raise ConfigurationError(f"URLs pointing to private networks are not allowed: {host}")
+
+
+# Minimum file size (bytes) to bother compressing. Below this, the overhead
+# of spawning ffmpeg exceeds the upload time savings.
+_COMPRESS_THRESHOLD = 100_000  # 100 KB
+
+_FFMPEG = shutil.which("ffmpeg")
+
+
+def _compress_wav_to_opus(path: Path) -> Optional[bytes]:
+    """Compress a WAV file to Opus/OGG using ffmpeg.
+
+    Returns the compressed bytes, or ``None`` if ffmpeg is unavailable or
+    the file is too small to benefit from compression.
+    """
+    if _FFMPEG is None:
+        return None
+    if path.suffix.lower() != ".wav":
+        return None
+    abs_path = path.resolve()
+    if not abs_path.is_file():
+        return None
+    if abs_path.stat().st_size < _COMPRESS_THRESHOLD:
+        return None
+
+    try:
+        result = subprocess.run(
+            [
+                _FFMPEG, "-y", "-i", str(abs_path),
+                "-c:a", "libopus", "-b:a", "64k",
+                "-vbr", "on", "-application", "voip",
+                "-f", "ogg", "pipe:1",
+            ],
+            capture_output=True,
+            timeout=10,
+        )
+        if result.returncode == 0 and len(result.stdout) > 0:
+            return result.stdout
+    except (subprocess.TimeoutExpired, OSError):
+        pass
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -143,6 +217,10 @@ class AsyncBatchASR:
             path = Path(audio)
             if not path.is_file():
                 raise ConfigurationError(f"Audio file not found: {path}")
+            if path.stat().st_size > MAX_AUDIO_SIZE:
+                raise ConfigurationError(
+                    f"Audio file too large: {path.stat().st_size} bytes (max {MAX_AUDIO_SIZE})"
+                )
             filename = path.name
             ct = _guess_content_type(filename)
             fh = open(path, "rb")
@@ -192,6 +270,7 @@ class AsyncBatchASR:
         """
         import aiohttp
 
+        _validate_audio_url(audio_url)
         config = config or TranscriptionConfig()
         form = aiohttp.FormData()
 
@@ -200,7 +279,7 @@ class AsyncBatchASR:
 
         form.add_field("url", audio_url)
 
-        self._logger.debug("transcribe_url: %s", audio_url)
+        self._logger.debug("transcribe_url: submitting URL-based transcription")
 
         try:
             raw = await self._transport.post_form(_TRANSCRIPTIONS_PATH, form_data=form)
@@ -305,9 +384,24 @@ class SyncBatchASR:
             path = Path(audio)
             if not path.is_file():
                 raise ConfigurationError(f"Audio file not found: {path}")
-            filename = path.name
-            ct = _guess_content_type(filename)
-            fh = open(path, "rb")
+            if path.stat().st_size > MAX_AUDIO_SIZE:
+                raise ConfigurationError(
+                    f"Audio file too large: {path.stat().st_size} bytes (max {MAX_AUDIO_SIZE})"
+                )
+            # Try client-side compression for large WAV files
+            compressed = _compress_wav_to_opus(path)
+            if compressed is not None:
+                filename = path.stem + ".ogg"
+                ct = "audio/ogg"
+                fh = io.BytesIO(compressed)
+                self._logger.debug(
+                    "transcribe_file (sync): compressed %s (%d -> %d bytes)",
+                    path.name, path.stat().st_size, len(compressed),
+                )
+            else:
+                filename = path.name
+                ct = _guess_content_type(filename)
+                fh = open(path, "rb")
             files = {"file": (filename, fh, ct)}
             close_after = True
         else:
@@ -354,11 +448,12 @@ class SyncBatchASR:
         Returns:
             :class:`TranscriptionResult`
         """
+        _validate_audio_url(audio_url)
         config = config or TranscriptionConfig()
         form_fields = config.to_form_fields()
         form_fields["url"] = audio_url
 
-        self._logger.debug("transcribe_url (sync): %s", audio_url)
+        self._logger.debug("transcribe_url (sync): submitting URL-based transcription")
 
         try:
             raw = self._transport.post_form(

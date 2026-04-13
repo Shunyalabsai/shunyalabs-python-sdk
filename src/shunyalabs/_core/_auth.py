@@ -31,6 +31,16 @@ class StaticKeyAuth:
                 "API key required: provide api_key or set SHUNYALABS_API_KEY environment variable"
             )
 
+    def __repr__(self) -> str:
+        if len(self._api_key) > 8:
+            masked = f"{self._api_key[:4]}...{self._api_key[-4:]}"
+        else:
+            masked = "***"
+        return f"StaticKeyAuth(api_key='{masked}')"
+
+    def __str__(self) -> str:
+        return "StaticKeyAuth(***)"
+
     def get_api_key(self) -> str:
         """Get the raw API key string (for JSON body auth)."""
         return self._api_key

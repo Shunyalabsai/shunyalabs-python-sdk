@@ -63,15 +63,15 @@ class TTSConfig(BaseModel):
     """
 
     model: str = Field(
-        ...,
+        default="zero-indic",
         description="Model name (e.g. 'zero-indic').",
     )
-    voice: str = Field(
-        ...,
+    voice: Optional[str] = Field(
+        default=None,
         description="Speaker voice name (e.g. 'Varun', 'Nisha', 'Rajesh').",
     )
     response_format: Optional[OutputFormat] = Field(
-        OutputFormat.MP3,
+        OutputFormat.WAV,
         description="Output audio format.",
     )
     speed: Optional[float] = Field(
@@ -89,6 +89,10 @@ class TTSConfig(BaseModel):
     trim_silence: Optional[bool] = Field(
         False,
         description="Trim leading/trailing silence.",
+    )
+    word_timestamps: Optional[bool] = Field(
+        False,
+        description="Include word-level timing data in the response.",
     )
     volume_normalization: Optional[str] = Field(
         None,
@@ -178,6 +182,7 @@ class TTSResult(BaseModel):
     sample_rate: int = 16000
     duration_seconds: float
     format: str = "pcm"
+    word_timestamps: Optional[list] = Field(default=None)
 
     model_config = {"arbitrary_types_allowed": True}
 
@@ -247,6 +252,7 @@ class TTSResult(BaseModel):
             sample_rate=data.get("sample_rate", 16000),
             duration_seconds=data.get("duration_seconds", 0.0),
             format=data.get("format", "pcm"),
+            word_timestamps=data.get("word_timestamps"),
         )
 
 

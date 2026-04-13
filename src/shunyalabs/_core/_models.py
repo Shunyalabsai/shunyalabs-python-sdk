@@ -8,7 +8,7 @@ from typing import Any, Optional
 class HttpConnectionConfig:
     """Configuration for HTTP connection parameters."""
 
-    connect_timeout: float = 30.0
+    connect_timeout: float = 5.0
     operation_timeout: float = 300.0
 
 

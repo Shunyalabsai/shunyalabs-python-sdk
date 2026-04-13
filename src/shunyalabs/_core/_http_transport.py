@@ -7,6 +7,7 @@ retry logic and proper error handling.
 from __future__ import annotations
 
 import json
+import time as _time
 from typing import Any, Optional, Union
 
 from ._auth import StaticKeyAuth
@@ -18,7 +19,7 @@ from ._exceptions import (
 )
 from ._logging import get_logger
 from ._models import HttpConnectionConfig
-from ._retry import RETRYABLE_STATUS_CODES, should_retry
+from ._retry import RETRYABLE_STATUS_CODES, _sleep_time, should_retry
 
 logger = get_logger(__name__)
 
@@ -55,11 +56,17 @@ class AsyncHttpTransport:
                     "aiohttp is required for async HTTP transport. "
                     "Install with: pip install 'shunyalabs[ASR]' or 'shunyalabs[TTS]'"
                 )
+            import ssl as _ssl
+
             timeout = aiohttp.ClientTimeout(
                 connect=self._conn_config.connect_timeout,
                 total=self._conn_config.operation_timeout,
             )
+            ssl_ctx = _ssl.create_default_context()
+            ssl_ctx.minimum_version = _ssl.TLSVersion.TLSv1_2
+            connector = aiohttp.TCPConnector(ssl=ssl_ctx)
             self._session = aiohttp.ClientSession(
+                connector=connector,
                 timeout=timeout,
                 headers={"Accept-Encoding": "gzip, deflate"},
             )
@@ -90,7 +97,7 @@ class AsyncHttpTransport:
                         text = await resp.text()
                         if resp.status >= 400:
                             raise TransportError(
-                                f"HTTP {resp.status}: {text[:200]}"
+                                f"HTTP {resp.status}: non-JSON error response"
                             )
                         body = {"raw": text}
                     if resp.status >= 400:
@@ -176,7 +183,7 @@ class AsyncHttpTransport:
                         text = await resp.text()
                         if resp.status >= 400:
                             raise TransportError(
-                                f"HTTP {resp.status}: {text[:200]}"
+                                f"HTTP {resp.status}: non-JSON error response"
                             )
                         body = {"raw": text}
                     if resp.status >= 400:
@@ -236,7 +243,14 @@ class SyncHttpTransport:
                     "httpx is required for sync HTTP transport. "
                     "Install with: pip install 'shunyalabs[ASR]' or 'shunyalabs[TTS]'"
                 )
+            try:
+                import h2  # noqa: F401
+                _http2 = True
+            except ImportError:
+                _http2 = False
             self._client = httpx.Client(
+                http2=_http2,
+                verify=True,
                 timeout=httpx.Timeout(
                     connect=self._conn_config.connect_timeout,
                     read=self._conn_config.operation_timeout,
@@ -270,23 +284,26 @@ class SyncHttpTransport:
                 except (json.JSONDecodeError, ValueError):
                     if resp.status_code >= 400:
                         raise TransportError(
-                            f"HTTP {resp.status_code}: {resp.text[:200]}"
+                            f"HTTP {resp.status_code}: non-JSON error response"
                         )
                     body = {"raw": resp.text}
                 if resp.status_code >= 400:
                     if should_retry(resp.status_code) and attempt < self._max_retries:
                         last_exception = TransportError(f"HTTP {resp.status_code}")
+                        _time.sleep(_sleep_time(attempt))
                         continue
                     raise_for_status(resp.status_code, body)
                 return body
             except httpx.ConnectError as e:
                 last_exception = ConnectionError(f"Connection failed: {e}")
                 if attempt < self._max_retries:
+                    _time.sleep(_sleep_time(attempt))
                     continue
                 raise last_exception
             except httpx.ReadTimeout as e:
                 last_exception = TimeoutError(f"Request timed out: {e}")
                 if attempt < self._max_retries:
+                    _time.sleep(_sleep_time(attempt))
                     continue
                 raise last_exception
 
@@ -315,17 +332,20 @@ class SyncHttpTransport:
                     body = resp.json()
                     if should_retry(resp.status_code) and attempt < self._max_retries:
                         last_exception = TransportError(f"HTTP {resp.status_code}")
+                        _time.sleep(_sleep_time(attempt))
                         continue
                     raise_for_status(resp.status_code, body)
                 return resp.content
             except httpx.ConnectError as e:
                 last_exception = ConnectionError(f"Connection failed: {e}")
                 if attempt < self._max_retries:
+                    _time.sleep(_sleep_time(attempt))
                     continue
                 raise last_exception
             except httpx.ReadTimeout as e:
                 last_exception = TimeoutError(f"Request timed out: {e}")
                 if attempt < self._max_retries:
+                    _time.sleep(_sleep_time(attempt))
                     continue
                 raise last_exception
 
@@ -356,23 +376,26 @@ class SyncHttpTransport:
                 except (json.JSONDecodeError, ValueError):
                     if resp.status_code >= 400:
                         raise TransportError(
-                            f"HTTP {resp.status_code}: {resp.text[:200]}"
+                            f"HTTP {resp.status_code}: non-JSON error response"
                         )
                     body = {"raw": resp.text}
                 if resp.status_code >= 400:
                     if should_retry(resp.status_code) and attempt < self._max_retries:
                         last_exception = TransportError(f"HTTP {resp.status_code}")
+                        _time.sleep(_sleep_time(attempt))
                         continue
                     raise_for_status(resp.status_code, body)
                 return body
             except httpx.ConnectError as e:
                 last_exception = ConnectionError(f"Connection failed: {e}")
                 if attempt < self._max_retries:
+                    _time.sleep(_sleep_time(attempt))
                     continue
                 raise last_exception
             except httpx.ReadTimeout as e:
                 last_exception = TimeoutError(f"Request timed out: {e}")
                 if attempt < self._max_retries:
+                    _time.sleep(_sleep_time(attempt))
                     continue
                 raise last_exception
 

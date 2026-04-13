@@ -5,6 +5,7 @@ Requires the 'extras' optional dependency: pip install shunyalabs[extras]
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Iterator, Union
 
 if TYPE_CHECKING:
@@ -66,7 +67,10 @@ def save(
         >>> save(client.tts.stream("Hello"), "output.pcm")
     """
     audio_bytes = _resolve_audio(audio)
-    with open(path, "wb") as f:
+    resolved = Path(path).resolve()
+    if not resolved.parent.is_dir():
+        raise ValueError(f"Parent directory does not exist: {resolved.parent}")
+    with open(resolved, "wb") as f:
         f.write(audio_bytes)
 
 
@@ -80,7 +84,10 @@ def stream_to_file(
         chunks: Iterator of audio byte chunks.
         path: Output file path.
     """
-    with open(path, "wb") as f:
+    resolved = Path(path).resolve()
+    if not resolved.parent.is_dir():
+        raise ValueError(f"Parent directory does not exist: {resolved.parent}")
+    with open(resolved, "wb") as f:
         for chunk in chunks:
             f.write(chunk)
 

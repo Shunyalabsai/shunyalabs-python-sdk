@@ -10,8 +10,8 @@ from shunyalabs._core._config import ClientConfig
 class TestClientConfig:
     def test_default_urls(self):
         config = ClientConfig()
-        assert "tts.api.shunyalabs.ai" in config.resolve_tts_url()
-        assert "asr.api.shunyalabs.ai" in config.resolve_asr_url()
+        assert "tts.shunyalabs.ai" in config.resolve_tts_url()
+        assert "asr.shunyalabs.ai" in config.resolve_asr_url()
 
     def test_override_urls(self):
         config = ClientConfig(

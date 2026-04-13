@@ -37,7 +37,7 @@ def main():
     print(f"\nSaved configured output ({result.format})")
     if result.word_timestamps:
         for wt in result.word_timestamps:
-            print(f"  {wt.word}: {wt.start:.3f}s - {wt.end:.3f}s")
+            print(f"  {wt['word']}: {wt['start']:.3f}s - {wt['end']:.3f}s")
 
     client.close()
 

@@ -16,6 +16,8 @@ class ShunyalabsError(Exception):
 class APIError(ShunyalabsError):
     """Raised when the API returns an error response."""
 
+    _SAFE_BODY_KEYS = frozenset({"error", "message", "detail", "code", "request_id"})
+
     def __init__(
         self,
         message: str,
@@ -26,8 +28,15 @@ class APIError(ShunyalabsError):
     ):
         super().__init__(message)
         self.status_code = status_code
-        self.body = body
+        self.body = self._sanitize_body(body)
         self.request_id = request_id
+
+    @classmethod
+    def _sanitize_body(cls, body: Any) -> Optional[dict]:
+        """Strip server response body to known-safe fields only."""
+        if not isinstance(body, dict):
+            return None
+        return {k: v for k, v in body.items() if k in cls._SAFE_BODY_KEYS}
 
     def __str__(self) -> str:
         parts = [super().__str__()]

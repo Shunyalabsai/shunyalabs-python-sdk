@@ -174,6 +174,21 @@ class ShunyaClient:
             self._tts = _TTSNamespace(self)
         return self._tts
 
+    def warm(self) -> None:
+        """Pre-establish TCP+TLS connections to configured services.
+
+        Call this after creating the client to avoid cold-start latency
+        on the first transcription request (~300ms TLS handshake savings).
+        """
+        # Trigger lazy init of the batch transport + underlying httpx client
+        batch = self.asr._get_batch()
+        transport = batch._transport
+        client = transport._get_client()
+        try:
+            client.get(f"{transport._url}/health")
+        except Exception:
+            pass  # Best-effort; connection is still warmed even on error
+
     def close(self) -> None:
         """Close all underlying connections."""
         if self._asr and self._asr._batch:
