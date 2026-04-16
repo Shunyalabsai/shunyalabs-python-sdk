@@ -2,6 +2,19 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [pipecat-shunyalabs 1.0.2] - 2026-04-16
+
+### Fixed
+
+- **Pipecat STT — display-name language crash**: `ShunyalabsSTTService` no
+  longer raises `ValueError: 'English' is not a valid Language` in its
+  `on_partial` / `on_final_segment` / `on_final` callbacks when the ASR
+  gateway reports the detected language as a human-readable display name
+  (e.g. `"English"`, `"Hindi"`) rather than the ISO code passed in
+  `StreamingConfig`. Display names are now normalised to ISO codes and
+  unrecognised values fall back to `None`, so transcription frames are
+  always delivered to the pipeline.
+
 ## [3.0.3] - 2026-04-11
 
 ### Breaking Changes (TTS)
