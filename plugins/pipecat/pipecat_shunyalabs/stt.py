@@ -57,6 +57,54 @@ logger = logging.getLogger(__name__)
 _DEFAULT_WS_URL = "wss://asr.shunyalabs.ai/ws"
 _MIN_SEND_BYTES = 4096
 
+# The ASR gateway may emit the detected language either as an ISO code
+# (e.g. "en") or as a human-readable display name (e.g. "English"). Only
+# ISO codes are accepted by ``pipecat.transcriptions.language.Language``,
+# so we normalise common display names before constructing the enum and
+# fall back to ``None`` if the value is still unrecognised — the frame
+# itself is more valuable than a strict language tag.
+_LANGUAGE_NAME_ALIASES = {
+    "english": "en",
+    "hindi": "hi",
+    "spanish": "es",
+    "french": "fr",
+    "german": "de",
+    "italian": "it",
+    "portuguese": "pt",
+    "russian": "ru",
+    "japanese": "ja",
+    "chinese": "zh",
+    "korean": "ko",
+    "arabic": "ar",
+    "bengali": "bn",
+    "tamil": "ta",
+    "telugu": "te",
+    "marathi": "mr",
+    "gujarati": "gu",
+    "kannada": "kn",
+    "malayalam": "ml",
+    "punjabi": "pa",
+    "urdu": "ur",
+}
+
+
+def _to_language(value: Optional[str]) -> Optional[Language]:
+    """Best-effort conversion of a gateway language string to ``Language``.
+
+    Returns ``None`` for missing, ``"auto"``, or unrecognised values so
+    callbacks never crash on a new / unexpected language tag.
+    """
+    if not value or value == "auto":
+        return None
+    candidate = _LANGUAGE_NAME_ALIASES.get(value.lower(), value)
+    try:
+        return Language(candidate)
+    except ValueError:
+        logger.debug(
+            "ShunyalabsSTTService: unrecognised language %r from gateway", value
+        )
+        return None
+
 
 class ShunyalabsSTTService(STTService):
     """Pipecat STT service backed by the Shunyalabs ASR gateway.
@@ -157,7 +205,7 @@ class ShunyalabsSTTService(STTService):
                             text=msg.text,
                             user_id="",
                             timestamp=str(time.time()),
-                            language=Language(msg.language) if msg.language and msg.language != "auto" else None,
+                            language=_to_language(msg.language),
                         )
                     ))
 
@@ -169,7 +217,7 @@ class ShunyalabsSTTService(STTService):
                             text=msg.text,
                             user_id="",
                             timestamp=str(time.time()),
-                            language=Language(msg.language) if msg.language and msg.language != "auto" else None,
+                            language=_to_language(msg.language),
                         )
                     ))
 
@@ -181,7 +229,7 @@ class ShunyalabsSTTService(STTService):
                             text=msg.text,
                             user_id="",
                             timestamp=str(time.time()),
-                            language=Language(msg.language) if msg.language and msg.language != "auto" else None,
+                            language=_to_language(msg.language),
                         )
                     ))
 
