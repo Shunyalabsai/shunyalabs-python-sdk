@@ -150,7 +150,8 @@ class TTSConfig(BaseModel):
         }
 
         # Merge every non-None config value.
-        for field_name, field_info in self.model_fields.items():
+        # Access model_fields on the class (instance access is deprecated in Pydantic V2.11+).
+        for field_name, field_info in type(self).model_fields.items():
             value = getattr(self, field_name)
             if value is not None:
                 # Serialize enums to their string value.
