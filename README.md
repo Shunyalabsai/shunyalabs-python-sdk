@@ -34,7 +34,7 @@ client = AsyncShunyaClient(api_key="your-api-key")
 
 Or set the `SHUNYALABS_API_KEY` environment variable and omit `api_key=`.
 
----
+---    
 
 ## Quick Start
 
