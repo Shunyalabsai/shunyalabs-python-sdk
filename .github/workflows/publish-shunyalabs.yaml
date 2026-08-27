@@ -1,0 +1,75 @@
+name: Publish Shunyalabs SDK
+
+# Manual, tag-triggered publishing for the Shunya Labs packages
+# (shunyalabs, pipecat-shunyalabs, livekit-plugins-shunyalabs).
+#
+#   pub-check/*    -> diagnostic only: reports whether PYPI_ORG_TOKEN is set
+#                     (never prints the value, never publishes)
+#   pub-core/*     -> build + publish the core `shunyalabs` package
+#   pub-plugins/*  -> build + publish both plugin packages
+#
+# Publish core FIRST (the plugins depend on shunyalabs>=3.0.4).
+
+on:
+  push:
+    tags:
+      - "pub-check/*"
+      - "pub-core/*"
+      - "pub-plugins/*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Report PYPI_ORG_TOKEN availability (value never printed)
+        env:
+          TOK: ${{ secrets.PYPI_ORG_TOKEN }}
+        run: |
+          if [ -z "${TOK}" ]; then
+            echo "RESULT: PYPI_ORG_TOKEN is EMPTY / not configured for this repo."
+            if [[ "${GITHUB_REF}" == refs/tags/pub-check/* ]]; then
+              echo "Diagnostic tag: nothing to publish, exiting cleanly."
+              exit 0
+            fi
+            echo "::error::PYPI_ORG_TOKEN is not set — refusing to publish."
+            exit 1
+          fi
+          echo "RESULT: PYPI_ORG_TOKEN IS present (length ${#TOK})."
+
+      - name: Stop after diagnostic (pub-check)
+        if: startsWith(github.ref, 'refs/tags/pub-check/')
+        run: echo "Diagnostic only — no build, no publish."
+
+      - name: Checkout
+        if: ${{ !startsWith(github.ref, 'refs/tags/pub-check/') }}
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        if: ${{ !startsWith(github.ref, 'refs/tags/pub-check/') }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build + publish
+        if: ${{ !startsWith(github.ref, 'refs/tags/pub-check/') }}
+        env:
+          TWINE_USERNAME: __token__
+          TWINE_PASSWORD: ${{ secrets.PYPI_ORG_TOKEN }}
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip build twine
+          rm -rf dist && mkdir -p dist
+          if [[ "${GITHUB_REF}" == refs/tags/pub-core/* ]]; then
+            echo "Building core shunyalabs ..."
+            python -m build --outdir dist .
+          else
+            echo "Building plugins ..."
+            python -m build --outdir dist plugins/pipecat
+            python -m build --outdir dist plugins/livekit
+          fi
+          echo "--- artifacts ---"; ls -la dist/
+          twine check dist/*
+          twine upload --non-interactive --skip-existing dist/*

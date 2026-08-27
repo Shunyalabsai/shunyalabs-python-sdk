@@ -13,12 +13,12 @@ Provides `ShunyalabsSTTService` and `ShunyalabsTTSService` that integrate with P
 - High-fidelity voice synthesis with 46 speakers across 23 languages
 - 11 emotion/delivery style tags for expressive voice responses
 - Native Pipecat frame protocol — drop-in with any Pipecat pipeline
-- Persistent WebSocket for STT; per-request WebSocket for TTS
-- Output formats: PCM, WAV, MP3, OGG Opus, FLAC, mu-law, A-law
+- Persistent WebSocket for both STT and TTS — each turn speaks with a flush on the shared session
+- Real-time PCM audio frames (24 kHz, 16-bit mono), native to Pipecat's audio pipeline
 
 ## Installation
 
-**Requirements:** Python 3.8+, Pipecat framework, a valid Shunyalabs API key.
+**Requirements:** Python 3.9+, Pipecat framework, a valid Shunyalabs API key.
 
 ```bash
 pip install pipecat-shunyalabs
@@ -32,6 +32,8 @@ pip install pipecat-shunyalabs pipecat-ai[daily]
 ```
 
 ## Authentication
+
+Pass your API key. The SDK exchanges your API key for a short-lived access token automatically and refreshes it in the background — you never manage tokens yourself.
 
 Set your API key as an environment variable (recommended):
 
@@ -101,15 +103,15 @@ Real-time streaming speech-to-text over WebSocket. Maintains a persistent connec
 | ------------- | ----- | ---------------------------- | ------------------------------------------------------------------- |
 | `api_key`     | `str` | `None`                       | API key. Falls back to `SHUNYALABS_API_KEY` env var.                |
 | `language`    | `str` | `"auto"`                     | Language code (e.g. `"en"`, `"hi"`) or `"auto"` for auto-detection. |
-| `url`         | `str` | `wss://asr.shunyalabs.ai/ws` | WebSocket endpoint URL.                                             |
+| `url`         | `str` | `wss://asrv2prod.shunyalabs.ai/v1/realtime` | WebSocket endpoint URL.                              |
 | `sample_rate` | `int` | `16000`                      | Expected audio sample rate in Hz. Must match transport input.       |
 
 ### How It Works
 
-1. On pipeline `start`, opens a WebSocket connection to the Shunyalabs ASR gateway.
-2. Audio chunks from the pipeline input are forwarded via `send_audio()`.
-3. The gateway's built-in VAD detects speech boundaries and emits transcription events.
-4. Events are mapped to Pipecat frames and pushed into the pipeline.
+1. On pipeline `start`, the SDK opens a WebSocket to the real-time ASR service and sends a JSON init message (`{language, sample_rate}`); the service replies with `{"type": "ready"}`.
+2. Audio chunks from the pipeline input are sent as binary data via `send_audio()`.
+3. The service detects speech boundaries and emits `{"type": "partial"}` and `{"type": "final"}` messages.
+4. Those events are mapped to Pipecat frames and pushed into the pipeline. A bare `"end"` marker finalizes the stream on shutdown.
 
 ### Frame Mapping
 
@@ -138,33 +140,24 @@ If the WebSocket connection drops during audio streaming, the service automatica
 
 ## TTS — `ShunyalabsTTSService`
 
-Streaming text-to-speech over WebSocket. Each synthesis request opens a new connection, streams audio chunks back as `TTSAudioRawFrame` frames. Supports 46 speakers across 23 languages — any speaker can synthesize in any language.
+Streaming text-to-speech over a **persistent** WebSocket. The session is opened once (init message `{voice, language, model}`; the service replies `{"type": "ready", "sample_rate": 24000}`) and reused for every turn: each `run_tts` sends the text as `{"type": "text", ...}` then `{"type": "flush"}`, and the service streams `{"type": "speaking"}`, binary PCM (24 kHz, 16-bit mono), and `{"type": "done"}` — surfaced as `TTSAudioRawFrame` frames. The session closes with a bare `"end"` on pipeline stop. Supports 46 speakers across 23 languages — any speaker can synthesize in any language. The plugin supports barge-in: an interruption resets the streaming session, so no audio from the interrupted turn leaks into the next one.
 
 ### Parameters
 
 | Parameter       | Type    | Default                      | Description                                                   |
 | --------------- | ------- | ---------------------------- | ------------------------------------------------------------- |
 | `api_key`       | `str`   | `None`                       | API key. Falls back to `SHUNYALABS_API_KEY` env var.          |
-| `url`           | `str`   | `wss://tts.shunyalabs.ai/ws` | WebSocket endpoint URL.                                       |
+| `url`           | `str`   | `wss://ttsv2.shunyalabs.ai/v1/realtime` | WebSocket endpoint URL.                            |
 | `model`         | `str`   | `"zero-indic"`               | TTS model identifier.                                         |
 | `voice`         | `str`   | `"Rajesh"`                   | Speaker voice. See [Available Speakers](#available-speakers). |
-| `speaker`       | `str`   | `"Rajesh"`                   | Speaker identifier (typically same as `voice`).               |
-| `style`         | `str`   | `"<Neutral>"`                | Emotion/delivery style tag. See [Style Tags](#style-tags).    |
+| `style`         | `str`   | `None`                       | Emotion/delivery style tag. See [Style Tags](#style-tags).    |
 | `language`      | `str`   | `"en"`                       | Output language code (e.g. `"en"`, `"hi"`, `"ta"`).           |
-| `output_format` | `str`   | `"pcm"`                      | Audio encoding. See [Output Formats](#output-formats).        |
-| `speed`         | `float` | `1.0`                        | Speaking speed multiplier (0.25–4.0).                         |
+| `output_format` | `str`   | `"pcm"`                      | Kept for API compatibility. The real-time stream always delivers PCM — see [Audio Output](#audio-output). |
+| `speed`         | `float` | `1.0`                        | Kept for API compatibility. Speed control is a batch-API feature; the stream plays at natural rate. |
 
-### Output Formats
+### Audio Output
 
-| Format           | Value      | Recommended Use                                 |
-| ---------------- | ---------- | ----------------------------------------------- |
-| PCM (raw 16-bit) | `pcm`      | Real-time pipelines, Pipecat `TTSAudioRawFrame` |
-| WAV              | `wav`      | Uncompressed storage, offline processing        |
-| MP3              | `mp3`      | Compressed storage, web delivery                |
-| OGG Opus         | `ogg_opus` | Compressed web streaming                        |
-| FLAC             | `flac`     | Lossless compressed storage                     |
-| mu-law           | `mulaw`    | Telephony systems (G.711)                       |
-| A-law            | `alaw`     | Telephony systems (G.711 European)              |
+The streaming service delivers **raw PCM (24 kHz, 16-bit, mono)** — the format Pipecat's audio pipeline consumes as `TTSAudioRawFrame`. Container formats (WAV, MP3, FLAC, OGG Opus, G.711 mu-law/A-law) and speed control are features of the Shunya Labs **batch** REST API (`POST /v1/audio/speech`) and the SDK's `AsyncBatchTTS`, not the real-time stream.
 
 ### Style Tags
 
@@ -187,7 +180,7 @@ Streaming text-to-speech over WebSocket. Each synthesis request opens a new conn
 The service automatically formats text as `"<Style> text"` before sending to the API:
 
 ```python
-tts = ShunyalabsTTSService(speaker="Rajesh", style="<Happy>")
+tts = ShunyalabsTTSService(voice="Rajesh", style="<Happy>")
 # Input: "Welcome!"
 # Sent:  "<Happy> Welcome!"
 ```
@@ -227,7 +220,7 @@ tts = ShunyalabsTTSService(speaker="Rajesh", style="<Happy>")
 | Frame              | Description                                      |
 | ------------------ | ------------------------------------------------ |
 | `TTSStartedFrame`  | Emitted when synthesis begins.                   |
-| `TTSAudioRawFrame` | Emitted for each audio chunk (PCM, 16kHz, mono). |
+| `TTSAudioRawFrame` | Emitted for each audio chunk (PCM, 24 kHz, mono). |
 | `TTSStoppedFrame`  | Emitted when synthesis completes.                |
 
 ### Example
@@ -238,11 +231,8 @@ from pipecat_shunyalabs import ShunyalabsTTSService
 tts = ShunyalabsTTSService(
     model="zero-indic",
     voice="Nisha",
-    speaker="Nisha",
     style="<Enthusiastic>",
     language="en",
-    speed=1.1,
-    output_format="pcm",
 )
 ```
 
@@ -384,7 +374,7 @@ except ShunyalabsError as e:
 | Symptom                           | Resolution                                                                                 |
 | --------------------------------- | ------------------------------------------------------------------------------------------ |
 | `AuthenticationError` on startup  | Verify `SHUNYALABS_API_KEY` is set and valid.                                              |
-| WebSocket connection refused      | Ensure outbound WSS (port 443) is open to `asr.shunyalabs.ai` and `tts.shunyalabs.ai`.     |
+| WebSocket connection refused      | Ensure outbound WSS (port 443) is open to `asrv2prod.shunyalabs.ai` and `ttsv2.shunyalabs.ai`. |
 | No transcription output           | Check `sample_rate` matches your transport input. Verify audio source is active.           |
 | TTS audio silent or missing       | Ensure `output_format=pcm` matches transport output. Verify `TTSStartedFrame` is received. |
 | High latency on first TTS chunk   | Deploy closer to the Shunyalabs gateway region (`asia-south1`).                            |

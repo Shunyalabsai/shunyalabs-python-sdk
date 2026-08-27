@@ -24,7 +24,7 @@ logger = get_logger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
-_TTS_PATH = "/"
+_TTS_PATH = "/v1/audio/speech"
 
 
 def _build_payload(

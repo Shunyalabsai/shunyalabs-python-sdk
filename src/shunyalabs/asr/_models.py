@@ -122,6 +122,7 @@ class TranscriptionResult(BaseModel):
     text: str = ""
     segments: List[SegmentResult] = Field(default_factory=list)
     detected_language: Optional[str] = None
+    detected_language_name: Optional[str] = None
     speakers: List[str] = Field(default_factory=list)
     audio_duration: Optional[float] = None
     inference_time_ms: Optional[float] = None

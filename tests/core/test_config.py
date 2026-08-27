@@ -10,8 +10,11 @@ from shunyalabs._core._config import ClientConfig
 class TestClientConfig:
     def test_default_urls(self):
         config = ClientConfig()
-        assert "tts.shunyalabs.ai" in config.resolve_tts_url()
-        assert "asr.shunyalabs.ai" in config.resolve_asr_url()
+        # v2 real-time services (asrv2prod / ttsv2), streaming on /v1/realtime.
+        assert "ttsv2.shunyalabs.ai" in config.resolve_tts_url()
+        assert "asrv2prod.shunyalabs.ai" in config.resolve_asr_url()
+        assert config.resolve_tts_ws_url().endswith("/v1/realtime")
+        assert config.resolve_asr_ws_url().endswith("/v1/realtime")
 
     def test_override_urls(self):
         config = ClientConfig(

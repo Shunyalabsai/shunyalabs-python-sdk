@@ -15,6 +15,8 @@ pip install livekit-plugins-shunyalabs
 
 ## Authentication
 
+Pass your API key. The SDK exchanges your API key for a short-lived access token automatically and refreshes it in the background — you never handle tokens yourself.
+
 Set your API key as an environment variable:
 
 ```bash
@@ -38,7 +40,7 @@ from livekit.plugins import shunyalabs, silero
 
 session = AgentSession(
     stt=shunyalabs.STT(language="en"),
-    tts=shunyalabs.TTS(speaker="Rajesh", style="<Neutral>"),
+    tts=shunyalabs.TTS(voice="Rajesh", style="<Neutral>"),
     vad=silero.VAD.load(),
 )
 ```
@@ -53,8 +55,8 @@ session = AgentSession(
 |-----------|------|---------|-------------|
 | `api_key` | `str` | `None` | API key. Falls back to `SHUNYALABS_API_KEY` env var. |
 | `language` | `str` | `"auto"` | BCP-47 language code or `"auto"` for auto-detection. |
-| `api_url` | `str` | `https://asr.shunyalabs.ai` | REST batch endpoint base URL. |
-| `ws_url` | `str` | `wss://asr.shunyalabs.ai/ws` | WebSocket streaming endpoint URL. |
+| `api_url` | `str` | `https://asrv2prod.shunyalabs.ai` | REST batch endpoint base URL. |
+| `ws_url` | `str` | `wss://asrv2prod.shunyalabs.ai/v1/realtime` | WebSocket streaming endpoint URL. |
 
 ### Capabilities
 
@@ -66,7 +68,7 @@ session = AgentSession(
 
 ### Streaming STT
 
-Real-time transcription over WebSocket. Audio frames from LiveKit are forwarded to the Shunyalabs ASR gateway; transcription events are pushed back as `SpeechEvent`s.
+Real-time transcription over WebSocket. The SDK opens a connection to the real-time ASR service and sends a JSON init message (`{language, sample_rate}`); once the service replies `{"type": "ready"}`, audio frames from LiveKit are streamed as binary data and `{"type": "partial"}` / `{"type": "final"}` messages are surfaced as `SpeechEvent`s. A bare `"end"` marker finalizes the stream. The SDK handles this handshake for you.
 
 ```python
 from livekit.agents import AgentSession
@@ -113,15 +115,14 @@ print(event.alternatives[0].text)
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `api_key` | `str` | `None` | API key. Falls back to `SHUNYALABS_API_KEY` env var. |
-| `api_url` | `str` | `https://tts.shunyalabs.ai` | HTTP batch endpoint base URL. |
-| `ws_url` | `str` | `wss://tts.shunyalabs.ai/ws` | WebSocket streaming endpoint URL. |
+| `api_url` | `str` | `https://ttsv2.shunyalabs.ai` | HTTP batch endpoint base URL. |
+| `ws_url` | `str` | `wss://ttsv2.shunyalabs.ai/v1/realtime` | WebSocket streaming endpoint URL. |
 | `model` | `str` | `"zero-indic"` | TTS model name. |
 | `voice` | `str` | `"Rajesh"` | Voice name for the API. |
-| `speaker` | `str` | `"Rajesh"` | Speaker name prefix for text formatting. |
-| `style` | `str` | `"<Neutral>"` | Emotion style tag. See [Style Tags](#style-tags). |
+| `style` | `str` | `None` | Emotion style tag. See [Style Tags](#style-tags). When omitted, a default style is applied. |
 | `language` | `str` | `"en"` | Language code for transliteration. |
-| `sample_rate` | `int` | `16000` | Output audio sample rate in Hz. |
-| `output_format` | `str` | `"pcm"` | Audio format (`"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`). |
+| `sample_rate` | `int` | `24000` | Output audio sample rate in Hz. The gateway emits 24 kHz PCM on both the streaming and batch paths; override only if you resample the audio yourself. |
+| `output_format` | `str` | `"pcm"` | Audio format for the **batch** (`synthesize`) path (`"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`). The real-time stream is always PCM. |
 | `speed` | `float` | `1.0` | Speaking speed multiplier (0.25–4.0). |
 
 ### Style Tags
@@ -145,14 +146,14 @@ print(event.alternatives[0].text)
 The plugin automatically formats text as `"<Style> text"` before sending to the API. For example:
 
 ```python
-tts = shunyalabs.TTS(speaker="Rajesh", style="<Happy>")
+tts = shunyalabs.TTS(voice="Rajesh", style="<Happy>")
 # Input: "Welcome to our platform"
 # Sent:  "<Happy> Welcome to our platform"
 ```
 
 ### Streaming TTS
 
-Token-by-token streaming. Collects text tokens, then synthesizes on flush via WebSocket streaming.
+Token-by-token streaming. The SDK opens a connection to the real-time TTS service and sends a JSON init message (`{voice, language}`); once the service replies `{"type": "ready"}`, collected text is sent as `{"type": "text", ...}` followed by `{"type": "flush"}`, and the service returns `{"type": "speaking"}`, binary PCM audio, and `{"type": "done"}`. The SDK handles this handshake for you.
 
 ```python
 from livekit.agents import AgentSession
@@ -160,7 +161,6 @@ from livekit.plugins import shunyalabs
 
 session = AgentSession(
     tts=shunyalabs.TTS(
-        speaker="Nisha",
         style="<Conversational>",
         model="zero-indic",
         voice="Nisha",
@@ -175,7 +175,7 @@ Single text → audio synthesis via HTTP batch API.
 ```python
 from livekit.plugins import shunyalabs
 
-tts = shunyalabs.TTS(speaker="Varun", voice="Varun")
+tts = shunyalabs.TTS(voice="Varun")
 stream = tts.synthesize("Hello, how can I help you today?")
 ```
 
@@ -201,7 +201,6 @@ async def entrypoint(ctx):
         tts=shunyalabs.TTS(
             model="zero-indic",
             voice="Rajesh",
-            speaker="Rajesh",
             style="<Conversational>",
         ),
         vad=silero.VAD.load(),
@@ -220,7 +219,6 @@ async def entrypoint(ctx):
 ```python
 # Hindi speaker
 tts_hindi = shunyalabs.TTS(
-    speaker="Rajesh",
     voice="Rajesh",
     language="hi",
     style="<Neutral>",
@@ -228,7 +226,6 @@ tts_hindi = shunyalabs.TTS(
 
 # English speaker
 tts_english = shunyalabs.TTS(
-    speaker="Varun",
     voice="Varun",
     language="en",
     style="<Conversational>",

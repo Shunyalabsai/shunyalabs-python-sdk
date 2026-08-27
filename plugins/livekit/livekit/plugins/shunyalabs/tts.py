@@ -13,7 +13,7 @@ Usage::
     from livekit.plugins import shunyalabs
 
     session = AgentSession(
-        tts=shunyalabs.TTS(speaker="Rajesh"),
+        tts=shunyalabs.TTS(voice="Rajesh"),
     )
 """
 
@@ -37,7 +37,7 @@ from livekit.agents.tts import (
     TTSCapabilities,
 )
 
-from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._auth import TokenAuth
 from shunyalabs._core._http_transport import AsyncHttpTransport
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.tts._batch import AsyncBatchTTS
@@ -48,8 +48,8 @@ from ._version import __version__
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_API_URL = "https://tts.shunyalabs.ai"
-_DEFAULT_WS_URL = "wss://tts.shunyalabs.ai/ws"
+_DEFAULT_API_URL = "https://ttsv2.shunyalabs.ai"
+_DEFAULT_WS_URL = "wss://ttsv2.shunyalabs.ai/v1/realtime"
 
 
 class TTS(tts.TTS):
@@ -64,9 +64,13 @@ class TTS(tts.TTS):
         style: Emotion style tag (e.g. ``"<Happy>"``). Prepended to text.
             The gateway handles the speaker prefix and default style internally.
         language: ISO 639 language code (e.g. ``"en"``, ``"hi"``). Required.
-        sample_rate: Output sample rate (default 16000).
-        output_format: Audio format (``"pcm"``, ``"wav"``, ``"mp3"``).
-        speed: Speaking speed multiplier (0.5-2.0).
+        sample_rate: Output sample rate (default 24000 — the gateway emits
+            24 kHz PCM on both the streaming and batch paths; overriding this
+            without resampling the audio yourself will shift pitch/tempo).
+        output_format: Audio format for the batch path (``"pcm"``, ``"wav"``,
+            ``"mp3"``, ``"ogg_opus"``, ``"flac"``). The real-time stream is
+            always PCM.
+        speed: Speaking speed multiplier (0.25-4.0), applied on the batch path.
     """
 
     def __init__(
@@ -79,7 +83,7 @@ class TTS(tts.TTS):
         voice: str = "Rajesh",
         style: Optional[str] = None,
         language: str = "en",
-        sample_rate: int = 16000,
+        sample_rate: int = 24000,
         output_format: str = "pcm",
         speed: float = 1.0,
     ) -> None:
@@ -101,7 +105,7 @@ class TTS(tts.TTS):
         self._language = language
         self._output_format = output_format
         self._speed = speed
-        self._auth = StaticKeyAuth(self._api_key)
+        self._auth = TokenAuth(self._api_key)
 
     @property
     def model(self) -> str:
@@ -194,6 +198,12 @@ class ChunkedTTSStream(ChunkedStream):
 
         batch_tts = self._tts._make_batch_tts()
         config = self._tts._make_tts_config()
+        # The emitter is initialized as audio/pcm and the LiveKit pipeline
+        # consumes raw PCM, so force PCM here — otherwise a non-pcm
+        # output_format would push (e.g.) MP3 bytes under a PCM mime type and
+        # LiveKit would mis-decode them.
+        from shunyalabs.tts._models import OutputFormat
+        config.response_format = OutputFormat.PCM
 
         try:
             result = await batch_tts.synthesize(formatted, config=config)

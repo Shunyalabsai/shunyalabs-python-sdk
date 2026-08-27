@@ -7,7 +7,7 @@ Quick-start (batch, async)::
     from shunyalabs.asr import AsyncBatchASR, TranscriptionConfig
 
     auth = StaticKeyAuth("your-api-key")
-    transport = AsyncHttpTransport("https://asr.api.shunyalabs.ai", auth)
+    transport = AsyncHttpTransport("https://asrv2prod.shunyalabs.ai", auth)
     client = AsyncBatchASR(auth, transport)
 
     result = await client.transcribe("recording.wav")
@@ -17,7 +17,7 @@ Quick-start (streaming)::
 
     from shunyalabs.asr import AsyncStreamingASR, StreamingMessageType
 
-    streaming = AsyncStreamingASR(auth, "wss://asr.api.shunyalabs.ai/ws")
+    streaming = AsyncStreamingASR(auth, "wss://asrv2prod.shunyalabs.ai/v1/realtime")
     conn = await streaming.stream()
 
     @conn.on(StreamingMessageType.FINAL)

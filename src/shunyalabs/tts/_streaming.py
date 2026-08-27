@@ -1,19 +1,20 @@
 """Streaming TTS clients for the Shunyalabs SDK.
 
 Provides :class:`AsyncStreamingTTS` and :class:`SyncStreamingTTS` which
-communicate over the ``/ws/tts`` WebSocket endpoint on the TTS gateway.
+communicate over the ``wss://ttsv2.shunyalabs.ai/v1/realtime`` WebSocket
+endpoint.
 
 WebSocket protocol
 ------------------
-1. Client connects to ``ws://<host>/ws/tts``.
-2. Client sends a single JSON frame containing all ``TTSRequestSchema``
-   fields (with ``request_type = "streaming"``).
-3. For each audio chunk the server sends:
-   a. A **JSON** frame with chunk metadata (``{"type": "chunk", ...}``).
-   b. A **binary** frame containing the raw audio bytes.
-4. After the last chunk the server sends a **JSON** completion frame
-   (``{"type": "completion", ...}``).
-5. On error at any point the server may send ``{"type": "error", ...}``.
+1. Client connects to ``wss://ttsv2.shunyalabs.ai/v1/realtime``.
+2. Client sends an init JSON frame ``{"voice": ..., "language": ...,
+   "model": ...}``; the server replies ``{"type": "ready", ...}``.
+3. Client sends text as ``{"type": "text", "text": ...}`` frames and
+   flushes a segment with ``{"type": "flush"}``.
+4. To end audio the client sends the bare string ``"end"`` (lowercase).
+5. The server streams ``{"type": "speaking"}`` markers interleaved with
+   **binary** PCM audio frames, then a final ``{"type": "done"}`` frame.
+6. On error at any point the server may send ``{"type": "error", ...}``.
 """
 
 from __future__ import annotations
@@ -47,7 +48,7 @@ def _build_ws_payload(
     text: str,
     config: Optional[TTSConfig],
 ) -> dict:
-    """Build the JSON config frame for the ``/ws/tts`` WebSocket.
+    """Build the JSON config frame for the ``/v1/realtime`` WebSocket.
 
     Authentication is handled via the ``Authorization`` header on the
     WebSocket connection, not in the JSON payload.
@@ -64,12 +65,12 @@ def _build_ws_payload(
 # ---------------------------------------------------------------------------
 
 class AsyncStreamingTTS:
-    """Async streaming TTS via WebSocket ``/ws/tts``.
+    """Async streaming TTS via WebSocket ``/v1/realtime``.
 
     Args:
         auth: Authentication instance providing the API key.
-        ws_url: Full WebSocket URL for the ``/ws/tts`` endpoint
-            (e.g. ``"ws://localhost:8000/ws/tts"``).
+        ws_url: Full WebSocket URL for the ``/v1/realtime`` endpoint
+            (e.g. ``"wss://ttsv2.shunyalabs.ai/v1/realtime"``).
         ws_config: Optional WebSocket connection configuration.
     """
 
@@ -118,52 +119,50 @@ class AsyncStreamingTTS:
         try:
             await transport.connect()
 
-            # 1. Send the config frame.
-            payload = _build_ws_payload(text, config)
-            logger.debug("WS /ws/tts sending config: %s", list(payload.keys()))
-            await transport.send_message(payload)
+            # 1. init frame -> "ready" handshake. The first frame is a JSON object with the voice /
+            #    language; the server replies {"type":"ready","sample_rate":...}.
+            cfg = config or TTSConfig()
+            init: dict = {"voice": cfg.voice, "language": cfg.language}
+            if getattr(cfg, "model", None):
+                init["model"] = cfg.model
+            logger.debug("WS /v1/realtime init: %s", init)
+            await transport.send_message(init)
+            ready = await transport.receive_message()
+            if not isinstance(ready, dict) or ready.get("type") != "ready":
+                if isinstance(ready, dict) and ready.get("type") == "error":
+                    raise SynthesisError(f"Streaming error: {ready.get('error')}")
+                raise SynthesisError(f"Expected 'ready' handshake, got {ready!r}")
+            sr = ready.get("sample_rate")
 
-            # 2. Receive chunks until completion / error.
+            # 2. Speak the text, then close this one-shot session with the bare-string "end".
+            await transport.send_message({"type": "text", "text": text})
+            await transport.send_message("end")
+
+            # 3. Receive `speaking` markers + binary PCM frames until `done`.
             while True:
                 msg = await transport.receive_message()
 
-                # --- JSON frame ---
+                if isinstance(msg, (bytes, bytearray)):
+                    audio_data = bytes(msg)
+                    if detailed:
+                        yield (TTSChunk(type="chunk", sample_rate=sr), audio_data)
+                    else:
+                        yield audio_data
+                    continue
+
                 if isinstance(msg, dict):
                     msg_type = msg.get("type")
-
-                    if msg_type == "chunk":
-                        chunk = TTSChunk(**msg)
-                        # Next frame must be binary audio.
-                        audio_data = await transport.receive_message()
-                        if not isinstance(audio_data, bytes):
-                            raise SynthesisError(
-                                f"Expected binary audio frame after chunk metadata, "
-                                f"got {type(audio_data).__name__}"
-                            )
-                        if detailed:
-                            yield (chunk, audio_data)
-                        else:
-                            yield audio_data
-
-                    elif msg_type == "completion":
-                        # Stream ended normally.
+                    if msg_type in ("speaking", "ready"):
+                        continue
+                    elif msg_type == "done":
                         logger.debug("Stream completed: %s", msg)
                         break
-
                     elif msg_type == "error":
-                        error_detail = msg.get("error", "Unknown streaming error")
-                        raise SynthesisError(f"Streaming error: {error_detail}")
-
+                        raise SynthesisError(
+                            f"Streaming error: {msg.get('error', 'Unknown streaming error')}"
+                        )
                     else:
                         logger.warning("Unknown WS message type: %s", msg_type)
-
-                # --- unexpected binary frame outside chunk flow ---
-                elif isinstance(msg, bytes):
-                    logger.warning(
-                        "Received unexpected binary frame (%d bytes), skipping.",
-                        len(msg),
-                    )
-
                 else:
                     logger.warning("Received unexpected WS message: %r", msg)
 
@@ -222,53 +221,21 @@ class AsyncStreamingTTS:
         dest = Path(path)
         dest.parent.mkdir(parents=True, exist_ok=True)
 
-        transport = WsTransport(
-            url=self._ws_url,
-            auth=self._auth,
-            conn_config=self._ws_config,
-            sdk_component="tts",
+        # Reuse the ported `stream()` (new /v1/realtime handshake) and write the PCM to disk.
+        total_bytes = 0
+        chunks = 0
+        with open(dest, "wb") as fh:
+            async for audio in self.stream(text, config=config):
+                fh.write(audio)
+                total_bytes += len(audio)
+                chunks += 1
+
+        return TTSCompletion(
+            status="complete",
+            total_chunks=chunks,
+            # 24 kHz mono int16 is the realtime PCM format; derive seconds from the byte count.
+            total_duration_seconds=round(total_bytes / (24000 * 2), 3),
         )
-
-        completion: Optional[TTSCompletion] = None
-
-        try:
-            await transport.connect()
-
-            payload = _build_ws_payload(text, config)
-            await transport.send_message(payload)
-
-            with open(dest, "wb") as fh:
-                while True:
-                    msg = await transport.receive_message()
-
-                    if isinstance(msg, dict):
-                        msg_type = msg.get("type")
-
-                        if msg_type == "chunk":
-                            # Read the following binary frame.
-                            audio_data = await transport.receive_message()
-                            if isinstance(audio_data, bytes):
-                                fh.write(audio_data)
-
-                        elif msg_type == "completion":
-                            completion = TTSCompletion(**msg)
-                            break
-
-                        elif msg_type == "error":
-                            error_detail = msg.get("error", "Unknown streaming error")
-                            raise SynthesisError(f"Streaming error: {error_detail}")
-
-                    elif isinstance(msg, bytes):
-                        # Unexpected standalone binary -- write it anyway.
-                        fh.write(msg)
-
-        finally:
-            await transport.close()
-
-        if completion is None:
-            raise SynthesisError("Stream ended without a completion message")
-
-        return completion
 
 
 # ---------------------------------------------------------------------------
@@ -276,13 +243,13 @@ class AsyncStreamingTTS:
 # ---------------------------------------------------------------------------
 
 class SyncStreamingTTS:
-    """Synchronous streaming TTS via WebSocket ``/ws/tts``.
+    """Synchronous streaming TTS via WebSocket ``/v1/realtime``.
 
     Internally wraps :class:`AsyncStreamingTTS` using :func:`asyncio.run`.
 
     Args:
         auth: Authentication instance providing the API key.
-        ws_url: Full WebSocket URL for the ``/ws/tts`` endpoint.
+        ws_url: Full WebSocket URL for the ``/v1/realtime`` endpoint.
         ws_config: Optional WebSocket connection configuration.
     """
 

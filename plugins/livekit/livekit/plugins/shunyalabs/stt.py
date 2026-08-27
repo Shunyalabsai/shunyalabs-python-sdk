@@ -47,7 +47,7 @@ from livekit.agents.stt import (
     SpeechEventType,
 )
 
-from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._auth import TokenAuth
 from shunyalabs._core._http_transport import AsyncHttpTransport
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._batch import AsyncBatchASR
@@ -56,8 +56,8 @@ from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
 
 from ._version import __version__
 
-_DEFAULT_API_URL = "https://asr.shunyalabs.ai"
-_DEFAULT_WS_URL = "wss://asr.shunyalabs.ai/ws"
+_DEFAULT_API_URL = "https://asrv2prod.shunyalabs.ai"
+_DEFAULT_WS_URL = "wss://asrv2prod.shunyalabs.ai/v1/realtime"
 
 
 class STT(stt.STT):
@@ -95,7 +95,7 @@ class STT(stt.STT):
         self._language = language
         self._api_url = api_url.rstrip("/")
         self._ws_url = ws_url
-        self._auth = StaticKeyAuth(self._api_key)
+        self._auth = TokenAuth(self._api_key)
 
     @property
     def model(self) -> str:

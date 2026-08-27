@@ -1,8 +1,8 @@
-"""Async streaming ASR client over WebSocket (``WS /ws``).
+"""Async streaming ASR client over WebSocket (``WS /v1/realtime``).
 
 The streaming protocol works as follows:
 
-1. Connect to the WebSocket endpoint (``/ws``).
+1. Connect to the WebSocket endpoint (``/v1/realtime``).
 2. Send a JSON configuration frame containing language, sample rate, etc.
    The ``api_key`` is injected automatically from :class:`StaticKeyAuth`.
 3. Receive a ``{"type": "ready", "session_id": "..."}`` acknowledgement.
@@ -111,11 +111,11 @@ class ASRStreamingConnection(EventEmitter):
         """
         if self._closed:
             return
-        self._logger.debug("Sending END signal")
+        self._logger.debug("Sending end signal")
         try:
-            await self._transport.send_message("END")
+            await self._transport.send_message("end")
         except Exception as exc:
-            self._logger.warning("Failed to send END: %s", exc)
+            self._logger.warning("Failed to send end: %s", exc)
 
         # Wait for the receiver to see the ``done`` message
         try:
@@ -235,7 +235,7 @@ class AsyncStreamingASR:
 
     Args:
         auth: A :class:`StaticKeyAuth` instance.
-        ws_url: The full WebSocket URL (e.g. ``wss://asr.api.shunyalabs.ai/ws``).
+        ws_url: The full WebSocket URL (e.g. ``wss://asrv2prod.shunyalabs.ai/v1/realtime``).
         ws_config: Optional WebSocket connection settings (timeouts, ping, etc.).
     """
 

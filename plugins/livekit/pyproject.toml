@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "livekit-plugins-shunyalabs"
-version = "1.0.1"
+version = "1.0.2"
 description = "Shunyalabs ASR & TTS plugin for LiveKit Agents"
 readme = "README.md"
 authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
@@ -12,7 +12,9 @@ license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = [
     "livekit-agents>=1.4",
-    "shunyalabs[all]>=1.0",
+    # Requires the core SDK that carries token-based auth (TokenAuth) and the
+    # v2 realtime/batch protocol for asrv2prod + ttsv2. Older cores lack these.
+    "shunyalabs[all]>=3.0.4",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -31,6 +33,7 @@ shunyalabs = "livekit.plugins.shunyalabs"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["livekit*"]
 namespaces = true
 
 [tool.setuptools.package-data]

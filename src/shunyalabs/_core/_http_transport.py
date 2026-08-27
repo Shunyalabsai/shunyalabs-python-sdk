@@ -83,7 +83,7 @@ class AsyncHttpTransport:
 
         session = await self._get_session()
         url = f"{self._url}{path}"
-        req_headers = self._auth.get_auth_headers()
+        req_headers = await self._auth.aget_auth_headers()
         if headers:
             req_headers.update(headers)
 
@@ -130,7 +130,7 @@ class AsyncHttpTransport:
 
         session = await self._get_session()
         url = f"{self._url}{path}"
-        req_headers = self._auth.get_auth_headers()
+        req_headers = await self._auth.aget_auth_headers()
         if headers:
             req_headers.update(headers)
 
@@ -139,7 +139,13 @@ class AsyncHttpTransport:
             try:
                 async with session.post(url, json=json_data, headers=req_headers) as resp:
                     if resp.status >= 400:
-                        body = await resp.json(content_type=None)
+                        # Error bodies are not always JSON (e.g. an nginx/proxy
+                        # HTML 502); fall back to text so a non-JSON error can't
+                        # mask the real status with a JSONDecodeError.
+                        try:
+                            body = await resp.json(content_type=None)
+                        except Exception:
+                            body = {"detail": (await resp.text())[:500]}
                         if should_retry(resp.status) and attempt < self._max_retries:
                             last_exception = TransportError(f"HTTP {resp.status}")
                             continue
@@ -169,7 +175,7 @@ class AsyncHttpTransport:
 
         session = await self._get_session()
         url = f"{self._url}{path}"
-        req_headers = self._auth.get_auth_headers()
+        req_headers = await self._auth.aget_auth_headers()
         if headers:
             req_headers.update(headers)
 
@@ -329,7 +335,12 @@ class SyncHttpTransport:
             try:
                 resp = client.post(url, json=json_data, headers=req_headers)
                 if resp.status_code >= 400:
-                    body = resp.json()
+                    # Error bodies are not always JSON; fall back to text so a
+                    # non-JSON error can't mask the status with a decode error.
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        body = {"detail": resp.text[:500]}
                     if should_retry(resp.status_code) and attempt < self._max_retries:
                         last_exception = TransportError(f"HTTP {resp.status_code}")
                         _time.sleep(_sleep_time(attempt))
