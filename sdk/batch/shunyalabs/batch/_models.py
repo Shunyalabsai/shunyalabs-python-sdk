@@ -701,7 +701,7 @@ class Transcript:
                 if current_group:
                     text = self._join_content_items(current_group, word_delimiter)
                     if current_speaker:
-                        transcript_parts.append(f"SPEAKER {current_speaker}: {text}")  # type: ignore[unreachable]
+                        transcript_parts.append(f"SPEAKER {current_speaker}: {text}")
                     else:
                         transcript_parts.append(text)
                     current_group = []
