@@ -47,14 +47,14 @@ try:
 except ImportError:
     _STTSettings = None
 
-from shunyalabs._core._auth import StaticKeyAuth
+from shunyalabs._core._auth import TokenAuth
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
 from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
 
 logger = logging.getLogger(__name__)
 
-_DEFAULT_WS_URL = "wss://asr.shunyalabs.ai/ws"
+_DEFAULT_WS_URL = "wss://asrv2prod.shunyalabs.ai/v1/realtime"
 _MIN_SEND_BYTES = 4096
 
 # The ASR gateway may emit the detected language either as an ISO code
@@ -148,10 +148,13 @@ class ShunyalabsSTTService(STTService):
         self._language = language
         self._ws_url = url
         self._sample_rate = sample_rate
-        self._auth = StaticKeyAuth(self._api_key)
+        self._auth = TokenAuth(self._api_key)
         self._conn: Optional[ASRStreamingConnection] = None
         self._audio_buffer = bytearray()
         self._min_send_bytes = min_send_bytes
+        # Serialize reconnects so a burst of audio frames arriving while the
+        # socket is down cannot spawn several concurrent reconnect attempts.
+        self._reconnect_lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -278,15 +281,28 @@ class ShunyalabsSTTService(STTService):
         Transcription results arrive asynchronously via the event
         handlers registered in :meth:`_connect`.
         """
-        if self._conn and not self._conn.is_closed:
-            self._audio_buffer.extend(audio)
-            while len(self._audio_buffer) >= self._min_send_bytes:
-                chunk = bytes(self._audio_buffer[:self._min_send_bytes])
-                del self._audio_buffer[:self._min_send_bytes]
-                try:
-                    await self._conn.send_audio(chunk)
-                except Exception:
-                    logger.warning("ShunyalabsSTTService send failed; reconnecting")
+        # Proactively re-open a dropped socket before buffering more audio,
+        # so a mid-call disconnect (e.g. a transient network blip) recovers
+        # transparently instead of silently dropping the rest of the utterance.
+        if not self._conn or self._conn.is_closed:
+            async with self._reconnect_lock:
+                if not self._conn or self._conn.is_closed:
+                    try:
+                        await self._connect()
+                    except Exception as exc:
+                        logger.error("ShunyalabsSTTService reconnect failed: %s", exc)
+                        yield
+                        return
+
+        self._audio_buffer.extend(audio)
+        while len(self._audio_buffer) >= self._min_send_bytes:
+            chunk = bytes(self._audio_buffer[:self._min_send_bytes])
+            del self._audio_buffer[:self._min_send_bytes]
+            try:
+                await self._conn.send_audio(chunk)
+            except Exception:
+                logger.warning("ShunyalabsSTTService send failed; reconnecting")
+                async with self._reconnect_lock:
                     await self._connect()
-                    await self._conn.send_audio(chunk)
+                await self._conn.send_audio(chunk)
         yield  # async generator — no frames yielded synchronously

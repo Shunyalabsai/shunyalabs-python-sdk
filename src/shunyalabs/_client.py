@@ -17,7 +17,7 @@ from __future__ import annotations
 import os
 from typing import Any, Optional
 
-from ._core._auth import StaticKeyAuth
+from ._core._auth import StaticKeyAuth, TokenAuth
 from ._core._config import ClientConfig
 from ._core._http_transport import AsyncHttpTransport, SyncHttpTransport
 from ._core._logging import get_logger
@@ -156,7 +156,10 @@ class ShunyaClient:
             tts_ws_url=tts_ws_url,
             flow_url=flow_url,
         )
-        self._auth = StaticKeyAuth(self._config.resolve_api_key())
+        # ASR/TTS on the v2 services (asrv2prod, ttsv2) accept only a minted,
+        # short-lived JWT — never the raw API key. TokenAuth exchanges the key
+        # for a token and refreshes it transparently.
+        self._auth = TokenAuth(self._config.resolve_api_key())
         self._asr: Optional[_ASRNamespace] = None
         self._tts: Optional[_TTSNamespace] = None
 
@@ -324,7 +327,7 @@ class _AsyncFlowNamespace:
             from .flow._client import AsyncFlowClient
 
             self._flow_client = AsyncFlowClient(
-                auth=self._client._auth,
+                auth=self._client._flow_auth,
                 url=self._client._config.resolve_flow_url(),
                 conn_config=WsConnectionConfig(),
             )
@@ -393,7 +396,12 @@ class AsyncShunyaClient:
             tts_ws_url=tts_ws_url,
             flow_url=flow_url,
         )
-        self._auth = StaticKeyAuth(self._config.resolve_api_key())
+        # ASR/TTS on the v2 services (asrv2prod, ttsv2) accept only a minted,
+        # short-lived JWT — never the raw API key.
+        self._auth = TokenAuth(self._config.resolve_api_key())
+        # Flow targets a separate conversational-AI gateway; keep its existing
+        # key-based auth rather than presenting an ASR/TTS-audience token.
+        self._flow_auth = StaticKeyAuth(self._config.resolve_api_key())
         self._asr: Optional[_AsyncASRNamespace] = None
         self._tts: Optional[_AsyncTTSNamespace] = None
         self._flow: Optional[_AsyncFlowNamespace] = None

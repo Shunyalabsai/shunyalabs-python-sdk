@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pipecat-shunyalabs"
-version = "1.0.4"
+version = "1.2.0"
 description = "Shunyalabs ASR & TTS services for Pipecat"
 readme = "README.md"
 authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
@@ -12,7 +12,9 @@ license = {text = "MIT"}
 requires-python = ">=3.9"
 dependencies = [
     "pipecat-ai>=0.0.30",
-    "shunyalabs[all]>=1.0",
+    # Requires the core SDK that carries token-based auth (TokenAuth) and the
+    # v2 realtime/batch protocol for asrv2prod + ttsv2. Older cores lack these.
+    "shunyalabs[all]>=3.0.4",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -28,3 +30,4 @@ repository = "https://github.com/Shunyalabsai/shunyalabs-python-sdk"
 
 [tool.setuptools.packages.find]
 where = ["."]
+include = ["pipecat_shunyalabs*"]

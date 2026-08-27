@@ -142,7 +142,7 @@ class TTSConfig(BaseModel):
 
         Returns:
             A dict ready to be serialised as the JSON body for
-            ``POST /v1/audio/speech`` or sent over ``/ws/tts``.
+            ``POST /v1/audio/speech`` or sent over the ``/v1/realtime`` WebSocket.
         """
         payload: dict = {
             "input": text,
@@ -266,7 +266,7 @@ class TTSChunk(BaseModel):
     """Metadata for a single streaming audio chunk.
 
     Sent by the gateway as a JSON frame **before** the corresponding
-    binary audio frame on the ``/ws/tts`` WebSocket.
+    binary audio frame on the ``/v1/realtime`` WebSocket.
 
     Attributes:
         type: Always ``"chunk"``.
@@ -278,8 +278,10 @@ class TTSChunk(BaseModel):
     """
 
     type: Literal["chunk"] = "chunk"
-    request_id: str
-    chunk_index: int
+    # Optional: the /v1/realtime streaming protocol does not carry a per-chunk request_id or
+    # chunk_index, so these default to None rather than being required.
+    request_id: Optional[str] = None
+    chunk_index: Optional[int] = None
     is_final: bool = False
     format: Optional[str] = None
     sample_rate: Optional[int] = None
@@ -300,10 +302,12 @@ class TTSCompletion(BaseModel):
     """
 
     type: Literal["completion"] = "completion"
-    request_id: str
-    status: str
-    total_chunks: int
-    total_duration_seconds: float
+    # Defaulted: the /v1/realtime `done` event does not carry a request_id/status/counts, so a
+    # completion built from it fills what it knows (counts, duration, rate) and leaves the rest.
+    request_id: Optional[str] = None
+    status: str = "complete"
+    total_chunks: int = 0
+    total_duration_seconds: float = 0.0
     error_message: Optional[str] = None
     format: Optional[str] = None
     sample_rate: Optional[int] = None

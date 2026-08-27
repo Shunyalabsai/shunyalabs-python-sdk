@@ -34,10 +34,10 @@ class ClientConfig:
     flow_url: Optional[str] = None
 
     # Default URLs
-    _DEFAULT_ASR_URL: str = field(default="https://asr.shunyalabs.ai", init=False, repr=False)
-    _DEFAULT_ASR_WS_URL: str = field(default="wss://asr.shunyalabs.ai/ws", init=False, repr=False)
-    _DEFAULT_TTS_URL: str = field(default="https://tts.shunyalabs.ai", init=False, repr=False)
-    _DEFAULT_TTS_WS_URL: str = field(default="wss://tts.shunyalabs.ai/ws", init=False, repr=False)
+    _DEFAULT_ASR_URL: str = field(default="https://asrv2prod.shunyalabs.ai", init=False, repr=False)
+    _DEFAULT_ASR_WS_URL: str = field(default="wss://asrv2prod.shunyalabs.ai/v1/realtime", init=False, repr=False)
+    _DEFAULT_TTS_URL: str = field(default="https://ttsv2.shunyalabs.ai", init=False, repr=False)
+    _DEFAULT_TTS_WS_URL: str = field(default="wss://ttsv2.shunyalabs.ai/v1/realtime", init=False, repr=False)
     _DEFAULT_FLOW_URL: str = field(default="wss://flow.api.shunyalabs.ai/v1/flow", init=False, repr=False)
 
     def resolve_api_key(self) -> str:

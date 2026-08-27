@@ -92,7 +92,9 @@ class WsTransport:
         headers = {}
         if ws_headers:
             headers.update(ws_headers)
-        headers.update(self._auth.get_auth_headers())
+        # Async so a token-minting auth (TokenAuth) can fetch/refresh its JWT here;
+        # StaticKeyAuth's async accessor just returns the static Bearer header.
+        headers.update(await self._auth.aget_auth_headers())
 
         try:
             ws_kwargs: dict = {

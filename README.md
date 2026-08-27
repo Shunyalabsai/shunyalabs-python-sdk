@@ -24,7 +24,7 @@ pip install shunyalabs[extras]  # Audio playback helpers (sounddevice)
 
 ## Authentication
 
-All API calls use `Authorization: Bearer <api_key>` header authentication.
+Authenticate with your API key. The SDK exchanges your API key for a short-lived access token automatically and refreshes it for you, so you never manage tokens yourself — just pass your key.
 
 ```python
 from shunyalabs import AsyncShunyaClient
@@ -49,9 +49,9 @@ async def main():
     async with AsyncShunyaClient(api_key="your-api-key") as client:
         result = await client.tts.synthesize(
             "Hello, world!",
-            config=TTSConfig(model="zero-indic", voice="Varun"),
+            config=TTSConfig(model="zero-indic", voice="Varun", language="en"),
         )
-        result.save("output.mp3")
+        result.save("output.wav")
         print(f"{len(result.audio_data)} bytes saved")
 
 asyncio.run(main())
@@ -144,10 +144,10 @@ asyncio.run(main())
 | `api_key`     | `str`   | `None`                       | API key. Falls back to `SHUNYALABS_API_KEY` env var.  |
 | `timeout`     | `float` | `60.0`                       | Request timeout in seconds.                           |
 | `max_retries` | `int`   | `2`                          | Retries for failed requests (5xx, connection errors). |
-| `asr_url`     | `str`   | `https://asr.shunyalabs.ai`  | ASR batch API base URL.                               |
-| `asr_ws_url`  | `str`   | `wss://asr.shunyalabs.ai/ws` | ASR streaming WebSocket URL.                          |
-| `tts_url`     | `str`   | `https://tts.shunyalabs.ai`  | TTS batch API base URL.                               |
-| `tts_ws_url`  | `str`   | `wss://tts.shunyalabs.ai/ws` | TTS streaming WebSocket URL.                          |
+| `asr_url`     | `str`   | `https://asrv2prod.shunyalabs.ai`           | ASR batch API base URL.                               |
+| `asr_ws_url`  | `str`   | `wss://asrv2prod.shunyalabs.ai/v1/realtime` | ASR streaming WebSocket URL.                          |
+| `tts_url`     | `str`   | `https://ttsv2.shunyalabs.ai`               | TTS batch API base URL.                               |
+| `tts_ws_url`  | `str`   | `wss://ttsv2.shunyalabs.ai/v1/realtime`     | TTS streaming WebSocket URL.                          |
 
 All URL parameters can also be set via environment variables: `SHUNYALABS_ASR_URL`, `SHUNYALABS_ASR_WS_URL`, `SHUNYALABS_TTS_URL`, `SHUNYALABS_TTS_WS_URL`.
 
@@ -165,7 +165,7 @@ client = AsyncShunyaClient(
     api_key="your-api-key",
     asr_url="https://my-asr-server.example.com",
     tts_url="https://my-tts-server.example.com",
-    tts_ws_url="wss://my-tts-server.example.com/ws",
+    tts_ws_url="wss://my-tts-server.example.com/v1/realtime",
 )
 ```
 
@@ -179,12 +179,12 @@ Configuration for synthesis requests. Passed as `config=` to `synthesize()` and 
 
 | Parameter              | Type           | Default      | Description                                                        |
 | ---------------------- | -------------- | ------------ | ------------------------------------------------------------------ |
-| `model`                | `str`          | **required** | Model name (e.g. `"zero-indic"`).                                  |
-| `voice`                | `str`          | **required** | Speaker voice name. See [Available Speakers](#available-speakers). |
-| `response_format`      | `OutputFormat` | `"mp3"`      | Output audio format. See [Output Formats](#output-formats).        |
+| `model`                | `str`          | `"zero-indic"` | Model name.                                                      |
+| `language`             | `str`          | **required** | ISO 639 language code (e.g. `"en"`, `"hi"`, `"ta"`).               |
+| `voice`                | `str`          | **required** | Speaker voice name (required unless `reference_wav` is given). See [Available Speakers](#available-speakers). |
+| `response_format`      | `OutputFormat` | `"wav"`      | Output audio format. See [Output Formats](#output-formats).        |
 | `speed`                | `float`        | `1.0`        | Speaking speed multiplier (0.25–4.0).                              |
 | `trim_silence`         | `bool`         | `False`      | Trim leading/trailing silence from audio.                          |
-| `volume_normalization` | `str`          | `None`       | `"peak"` or `"loudness"`.                                          |
 | `background_audio`     | `str`          | `None`       | Preset name or base64-encoded background audio.                    |
 | `background_volume`    | `float`        | `0.1`        | Background volume relative to speech (0.0–1.0).                    |
 
@@ -218,7 +218,7 @@ result = await client.tts.synthesize("Good morning, how are you?", config=config
 Values: `"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`, `"mulaw"`, `"alaw"`
 
 ```python
-# MP3 (default) — compressed, good for storage
+# MP3 — compressed, good for storage
 config = TTSConfig(model="zero-indic", voice="Varun", response_format="mp3")
 result = await client.tts.synthesize("Hello!", config=config)
 result.save("output.mp3")
@@ -277,23 +277,6 @@ result = await client.tts.synthesize("Hello.", config=config)
 config = TTSConfig(model="zero-indic", voice="Rajesh", trim_silence=True)
 result = await client.tts.synthesize("Hello.", config=config)
 # Output: 48000 bytes (silence stripped)
-```
-
-**`volume_normalization` — Normalize audio loudness**
-
-Values: `None` (off), `"peak"`, `"loudness"`
-
-```python
-# No normalization (default)
-config = TTSConfig(model="zero-indic", voice="Rajesh")
-
-# Peak normalization — scale so the loudest sample hits 0 dBFS
-config = TTSConfig(model="zero-indic", voice="Rajesh", volume_normalization="peak")
-result = await client.tts.synthesize("This audio will have consistent peak levels.", config=config)
-
-# Loudness normalization — perceptually even loudness (EBU R128)
-config = TTSConfig(model="zero-indic", voice="Rajesh", volume_normalization="loudness")
-result = await client.tts.synthesize("This audio will sound equally loud regardless of content.", config=config)
 ```
 
 **`background_audio` + `background_volume` — Add background music**
@@ -528,9 +511,9 @@ Configuration for batch transcription. Passed as `config=` to `transcribe()`.
 
 | Parameter                    | Type        | Default | Description                              |
 | ---------------------------- | ----------- | ------- | ---------------------------------------- |
-| `enable_intent_detection`    | `bool`      | `False` | Classify transcript intent via Gemini.   |
+| `enable_intent_detection`    | `bool`      | `False` | Classify transcript intent.              |
 | `intent_choices`             | `list[str]` | `None`  | Constrain to specific intents.           |
-| `enable_summarization`       | `bool`      | `False` | Generate concise summary via Gemini.     |
+| `enable_summarization`       | `bool`      | `False` | Generate a concise summary.              |
 | `summary_max_length`         | `int`       | `150`   | Max words in summary.                    |
 | `enable_sentiment_analysis`  | `bool`      | `False` | Sentiment label, score, and explanation. |
 | `enable_keyterm_normalization` | `bool`    | `False` | Normalize domain-specific terms.         |

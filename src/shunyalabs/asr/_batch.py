@@ -1,4 +1,4 @@
-"""Batch ASR clients (sync and async) for ``POST /v1/transcriptions``.
+"""Batch ASR clients (sync and async) for ``POST /v1/audio/transcriptions``.
 
 Both clients accept an audio source (file path, file-like object, or URL)
 together with an optional :class:`TranscriptionConfig` and return a
@@ -139,7 +139,7 @@ def _compress_wav_to_opus(path: Path) -> Optional[bytes]:
 class AsyncBatchASR:
     """Async client for the ASR batch endpoint.
 
-    Maps to ``POST /v1/transcriptions`` on the ASR gateway.
+    Maps to ``POST /v1/audio/transcriptions`` on the ASR gateway.
 
     Args:
         auth: A :class:`StaticKeyAuth` instance (provides the Bearer header).
@@ -295,8 +295,16 @@ class AsyncBatchASR:
 
     @staticmethod
     def _parse_response(raw: Dict[str, Any]) -> TranscriptionResult:
-        """Validate and convert the raw JSON dict into a model instance."""
-        if not raw.get("success", False):
+        """Validate and convert the raw JSON dict into a model instance.
+
+        The plain transcription path returns ``{"text", "detected_language",
+        "detected_language_name"}`` with **no** ``success`` key; only the
+        diarization/curated path includes ``success: true``. So the failure
+        signal is an *explicit* ``success: false`` (or an error body carrying
+        no ``text``), not the mere absence of the key.
+        """
+        has_error = bool(raw.get("detail") or raw.get("error") or raw.get("message"))
+        if raw.get("success") is False or ("text" not in raw and has_error):
             detail = raw.get("detail") or raw.get("error") or raw.get("message") or "Unknown error"
             raise TranscriptionError(f"Gateway returned failure: {detail}")
         return TranscriptionResult.model_validate(raw)
@@ -471,8 +479,16 @@ class SyncBatchASR:
 
     @staticmethod
     def _parse_response(raw: Dict[str, Any]) -> TranscriptionResult:
-        """Validate and convert the raw JSON dict into a model instance."""
-        if not raw.get("success", False):
+        """Validate and convert the raw JSON dict into a model instance.
+
+        The plain transcription path returns ``{"text", "detected_language",
+        "detected_language_name"}`` with **no** ``success`` key; only the
+        diarization/curated path includes ``success: true``. So the failure
+        signal is an *explicit* ``success: false`` (or an error body carrying
+        no ``text``), not the mere absence of the key.
+        """
+        has_error = bool(raw.get("detail") or raw.get("error") or raw.get("message"))
+        if raw.get("success") is False or ("text" not in raw and has_error):
             detail = raw.get("detail") or raw.get("error") or raw.get("message") or "Unknown error"
             raise TranscriptionError(f"Gateway returned failure: {detail}")
         return TranscriptionResult.model_validate(raw)

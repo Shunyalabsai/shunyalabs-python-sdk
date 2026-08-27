@@ -2,6 +2,58 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [shunyalabs 3.0.4 · pipecat-shunyalabs 1.2.0 · livekit-plugins-shunyalabs 1.0.2] - 2026-08-27
+
+Real-time services cutover. ASR and TTS now run on the v2 real-time gateways
+with token-based authentication. **Upgrade all three packages together** — the
+plugins require `shunyalabs>=3.0.4`.
+
+### Changed — core (`shunyalabs` 3.0.4)
+
+- **Token authentication.** You still provide only your API key; the SDK now
+  exchanges it for a short-lived access token automatically and keeps it
+  refreshed. The raw API key is never sent to the STT/TTS services.
+  `AsyncShunyaClient` / `ShunyaClient` mint tokens on your behalf.
+- **New default endpoints.** ASR → `asrv2prod.shunyalabs.ai`, TTS →
+  `ttsv2.shunyalabs.ai`; real-time streaming on `/v1/realtime` for both. Override
+  with `asr_url` / `asr_ws_url` / `tts_url` / `tts_ws_url` (or the matching
+  `SHUNYALABS_*` env vars) as before.
+- **Streaming TTS** speaks over the `/v1/realtime` protocol and delivers raw PCM
+  (24 kHz, 16-bit mono).
+
+### Fixed — core
+
+- **Batch TTS** now targets `POST /v1/audio/speech` (previously returned 404).
+- **Batch ASR** now returns `detected_language` **and** `detected_language_name`,
+  and correctly parses the transcription response.
+
+### Changed — Pipecat (`pipecat-shunyalabs` 1.2.0)
+
+Supersedes the `1.1.x` line, which ran on the legacy gateway. `1.2.0` moves to
+the v2 real-time service while keeping the production-quality streaming
+behaviour.
+
+- New real-time endpoints and token auth (via the core SDK).
+- TTS runs over a **persistent** WebSocket session — each turn speaks with a
+  flush on the shared connection rather than reconnecting.
+- **Frame-paced streaming**: gateway audio is re-chunked into fixed 40 ms frames
+  emitted at wall-clock rate to prevent WebRTC encoder starvation/jitter.
+- **Barge-in**: an interruption resets the streaming session so audio from the
+  interrupted turn cannot leak into the next one.
+- **STT reconnect hardening**: a dropped socket is re-opened before more audio
+  is buffered, with reconnects serialized so a burst can't spawn several.
+- `TTSAudioRawFrame`s are PCM at **24 kHz** (was documented as 16 kHz).
+- `output_format` / `speed` are retained for compatibility but the real-time
+  stream is always PCM at natural rate; container formats and speed control are
+  batch REST API features.
+
+### Fixed — LiveKit (`livekit-plugins-shunyalabs` 1.0.2)
+
+- New real-time endpoints and token auth (via the core SDK).
+- **TTS `sample_rate` default is now 24000** (was 16000). The gateway emits
+  24 kHz PCM on both the streaming and batch paths; the previous default caused
+  pitch/tempo-shifted playback.
+
 ## [pipecat-shunyalabs 1.0.2] - 2026-04-16
 
 ### Fixed

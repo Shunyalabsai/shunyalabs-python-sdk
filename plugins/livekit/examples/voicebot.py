@@ -79,7 +79,7 @@ async def entrypoint(ctx: JobContext):
         ),
         tts=shunyalabs.TTS(
             api_key=os.environ.get("SHUNYALABS_API_KEY", "test"),
-            speaker="Rajesh",
+            voice="Rajesh",
             style="<Happy>",
             language="en",
         ),
