@@ -6,7 +6,7 @@
 
 The official Python SDK for [Shunyalabs](https://shunyalabs.ai) Speech AI APIs — **ASR** (speech-to-text) and **TTS** (text-to-speech).
 
-Supports HTTP batch and WebSocket streaming modes with a fully async client.
+Supports HTTP batch and WebSocket streaming modes with a fully async client.  
 
 ## Installation
 
