@@ -47,7 +47,7 @@ try:
 except ImportError:
     _STTSettings = None
 
-from shunyalabs._core._auth import TokenAuth
+from shunyalabs._core._auth import TokenAuth, resolve_endpoint
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
 from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
@@ -131,7 +131,7 @@ class ShunyalabsSTTService(STTService):
         *,
         api_key: Optional[str] = None,
         language: str = "auto",
-        url: str = _DEFAULT_WS_URL,
+        url: Optional[str] = None,
         sample_rate: int = 16000,
         min_send_bytes: int = _MIN_SEND_BYTES,
         **kwargs,
@@ -146,7 +146,11 @@ class ShunyalabsSTTService(STTService):
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
         self._language = language
-        self._ws_url = url
+        # explicit arg -> env var -> built-in default; the token-provided endpoint
+        # (if the service returns one) is folded in at connect time.
+        self._url_arg = url
+        self._ws_url = resolve_endpoint(arg=url, server=None,
+                                        env_var="SHUNYALABS_ASR_WS_URL", default=_DEFAULT_WS_URL)
         self._sample_rate = sample_rate
         self._auth = TokenAuth(self._api_key)
         self._conn: Optional[ASRStreamingConnection] = None
@@ -175,6 +179,10 @@ class ShunyalabsSTTService(STTService):
     async def _connect(self) -> None:
         """Open a streaming ASR connection via the SDK."""
         try:
+            # arg -> token-provided endpoint -> env var -> default (re-resolved each connect).
+            self._ws_url = resolve_endpoint(
+                arg=self._url_arg, server=(await self._auth.aget_endpoints()).get("asr_ws"),
+                env_var="SHUNYALABS_ASR_WS_URL", default=_DEFAULT_WS_URL)
             streaming = AsyncStreamingASR(
                 auth=self._auth,
                 ws_url=self._ws_url,

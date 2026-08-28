@@ -40,7 +40,7 @@ class _ASRNamespace:
             self._batch = SyncBatchASR(
                 auth=self._client._auth,
                 transport=SyncHttpTransport(
-                    url=self._client._config.resolve_asr_url(),
+                    url=self._client._config.resolve_asr_url(server=self._client._auth.get_endpoints_sync().get("asr_http")),
                     auth=self._client._auth,
                     conn_config=HttpConnectionConfig(
                         operation_timeout=self._client._config.timeout,
@@ -78,7 +78,7 @@ class _TTSNamespace:
             self._batch = SyncBatchTTS(
                 auth=self._client._auth,
                 transport=SyncHttpTransport(
-                    url=self._client._config.resolve_tts_url(),
+                    url=self._client._config.resolve_tts_url(server=self._client._auth.get_endpoints_sync().get("tts_http")),
                     auth=self._client._auth,
                     conn_config=HttpConnectionConfig(
                         operation_timeout=self._client._config.timeout,
@@ -94,7 +94,7 @@ class _TTSNamespace:
 
             self._streaming = SyncStreamingTTS(
                 auth=self._client._auth,
-                ws_url=self._client._config.resolve_tts_ws_url(),
+                ws_url=self._client._config.resolve_tts_ws_url(server=self._client._auth.get_endpoints_sync().get("tts_ws")),
                 ws_config=WsConnectionConfig(),
             )
         return self._streaming
@@ -224,7 +224,7 @@ class _AsyncASRNamespace:
             self._batch = AsyncBatchASR(
                 auth=self._client._auth,
                 transport=AsyncHttpTransport(
-                    url=self._client._config.resolve_asr_url(),
+                    url=self._client._config.resolve_asr_url(server=self._client._auth.get_endpoints_sync().get("asr_http")),
                     auth=self._client._auth,
                     conn_config=HttpConnectionConfig(
                         operation_timeout=self._client._config.timeout,
@@ -240,7 +240,7 @@ class _AsyncASRNamespace:
 
             self._streaming = AsyncStreamingASR(
                 auth=self._client._auth,
-                ws_url=self._client._config.resolve_asr_ws_url(),
+                ws_url=self._client._config.resolve_asr_ws_url(server=self._client._auth.get_endpoints_sync().get("asr_ws")),
                 ws_config=WsConnectionConfig(),
             )
         return self._streaming
@@ -277,7 +277,7 @@ class _AsyncTTSNamespace:
             self._batch = AsyncBatchTTS(
                 auth=self._client._auth,
                 transport=AsyncHttpTransport(
-                    url=self._client._config.resolve_tts_url(),
+                    url=self._client._config.resolve_tts_url(server=self._client._auth.get_endpoints_sync().get("tts_http")),
                     auth=self._client._auth,
                     conn_config=HttpConnectionConfig(
                         operation_timeout=self._client._config.timeout,
@@ -293,7 +293,7 @@ class _AsyncTTSNamespace:
 
             self._streaming = AsyncStreamingTTS(
                 auth=self._client._auth,
-                ws_url=self._client._config.resolve_tts_ws_url(),
+                ws_url=self._client._config.resolve_tts_ws_url(server=self._client._auth.get_endpoints_sync().get("tts_ws")),
                 ws_config=WsConnectionConfig(),
             )
         return self._streaming

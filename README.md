@@ -151,6 +151,8 @@ asyncio.run(main())
 
 All URL parameters can also be set via environment variables: `SHUNYALABS_ASR_URL`, `SHUNYALABS_ASR_WS_URL`, `SHUNYALABS_TTS_URL`, `SHUNYALABS_TTS_WS_URL`.
 
+Endpoints resolve by precedence: **explicit argument → endpoint returned by the token service → environment variable → built-in default.** So an endpoint can be moved centrally (delivered in the token response) with no SDK change or upgrade, an operator can override it with an environment variable, and code can pin it explicitly.
+
 **Examples:**
 
 ```python

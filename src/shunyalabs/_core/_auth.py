@@ -61,6 +61,16 @@ class StaticKeyAuth:
         """Async version of get_auth_headers."""
         return self.get_auth_headers()
 
+    # StaticKeyAuth never mints, so it carries no server-provided endpoints.
+    def endpoints(self) -> dict:
+        return {}
+
+    async def aget_endpoints(self) -> dict:
+        return {}
+
+    def get_endpoints_sync(self) -> dict:
+        return {}
+
 
 class TokenAuth:
     """Auth that mints a short-lived access token from an API key and refreshes it.
@@ -101,6 +111,11 @@ class TokenAuth:
         self._token: Optional[str] = None
         self._expires_at: float = 0.0          # monotonic deadline
         self._lock = asyncio.Lock()
+        # Endpoints optionally delivered by the token service, e.g.
+        # {"asr_ws": ..., "asr_http": ..., "tts_ws": ..., "tts_http": ...}.
+        # Empty until a mint returns them; lets the control plane repoint the
+        # data plane without an SDK release.
+        self._endpoints: dict = {}
 
     def __repr__(self) -> str:
         masked = f"{self._api_key[:4]}...{self._api_key[-4:]}" if len(self._api_key) > 8 else "***"
@@ -140,6 +155,10 @@ class TokenAuth:
             raise ConfigurationError(f"Token mint returned no token: {str(data)[:200]}")
         self._token = token
         self._expires_at = time.monotonic() + float(data.get("expires_in") or self._ttl)
+        # Optional server-provided data-plane endpoints (absent today; used
+        # transparently once the token service starts returning them).
+        eps = data.get("endpoints")
+        self._endpoints = eps if isinstance(eps, dict) else {}
 
     def _fresh(self) -> bool:
         return bool(self._token) and time.monotonic() < self._expires_at - self._buffer
@@ -185,5 +204,27 @@ class TokenAuth:
         (sync) SDK paths work; the async paths (streaming, async batch) use aget_auth_headers()."""
         return {"Authorization": f"Bearer {self.ensure_token_sync()}"}
 
+    def endpoints(self) -> dict:
+        """Endpoints already delivered by the token service (may be empty until minted)."""
+        return dict(self._endpoints)
 
-__all__ = ["StaticKeyAuth", "TokenAuth"]
+    async def aget_endpoints(self) -> dict:
+        """Ensure a token (minting if needed) and return any server-provided endpoints."""
+        await self.ensure_token()
+        return dict(self._endpoints)
+
+    def get_endpoints_sync(self) -> dict:
+        self.ensure_token_sync()
+        return dict(self._endpoints)
+
+
+def resolve_endpoint(*, arg: Optional[str], server: Optional[str],
+                     env_var: str, default: str) -> str:
+    """Resolve an endpoint URL by precedence:
+
+    explicit constructor arg -> server-provided (token) -> env var -> default.
+    """
+    return arg or server or os.environ.get(env_var) or default
+
+
+__all__ = ["StaticKeyAuth", "TokenAuth", "resolve_endpoint"]

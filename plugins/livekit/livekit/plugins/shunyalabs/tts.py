@@ -37,7 +37,7 @@ from livekit.agents.tts import (
     TTSCapabilities,
 )
 
-from shunyalabs._core._auth import TokenAuth
+from shunyalabs._core._auth import TokenAuth, resolve_endpoint
 from shunyalabs._core._http_transport import AsyncHttpTransport
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.tts._batch import AsyncBatchTTS
@@ -77,8 +77,8 @@ class TTS(tts.TTS):
         self,
         *,
         api_key: Optional[str] = None,
-        api_url: str = _DEFAULT_API_URL,
-        ws_url: str = _DEFAULT_WS_URL,
+        api_url: Optional[str] = None,
+        ws_url: Optional[str] = None,
         model: str = "zero-indic",
         voice: str = "Rajesh",
         style: Optional[str] = None,
@@ -97,8 +97,13 @@ class TTS(tts.TTS):
             raise ValueError(
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
-        self._api_url = api_url.rstrip("/")
-        self._ws_url = ws_url
+        # explicit arg -> env var -> built-in default (repoint without a code change)
+        self._api_url_arg = api_url
+        self._ws_url_arg = ws_url
+        self._api_url = resolve_endpoint(arg=api_url, server=None,
+                                         env_var="SHUNYALABS_TTS_URL", default=_DEFAULT_API_URL).rstrip("/")
+        self._ws_url = resolve_endpoint(arg=ws_url, server=None,
+                                        env_var="SHUNYALABS_TTS_WS_URL", default=_DEFAULT_WS_URL)
         self._model = model
         self._voice = voice
         self._style = style
@@ -130,6 +135,14 @@ class TTS(tts.TTS):
             response_format=self._output_format,
             speed=self._speed,
         )
+
+    async def _resolve_urls(self) -> None:
+        """arg -> token-provided endpoint -> env var -> default (folded in at use time)."""
+        eps = await self._auth.aget_endpoints()
+        self._api_url = resolve_endpoint(arg=self._api_url_arg, server=eps.get("tts_http"),
+                                         env_var="SHUNYALABS_TTS_URL", default=_DEFAULT_API_URL).rstrip("/")
+        self._ws_url = resolve_endpoint(arg=self._ws_url_arg, server=eps.get("tts_ws"),
+                                        env_var="SHUNYALABS_TTS_WS_URL", default=_DEFAULT_WS_URL)
 
     def _make_batch_tts(self) -> AsyncBatchTTS:
         """Create an AsyncBatchTTS instance using the SDK."""
@@ -196,6 +209,7 @@ class ChunkedTTSStream(ChunkedStream):
             mime_type="audio/pcm",
         )
 
+        await self._tts._resolve_urls()
         batch_tts = self._tts._make_batch_tts()
         config = self._tts._make_tts_config()
         # The emitter is initialized as audio/pcm and the LiveKit pipeline
@@ -258,6 +272,7 @@ class StreamingTTS(SynthesizeStream):
 
             output_emitter.start_segment(segment_id=seg_id)
 
+            await self._tts._resolve_urls()
             streaming_tts = self._tts._make_streaming_tts()
             config = self._tts._make_tts_config()
 
