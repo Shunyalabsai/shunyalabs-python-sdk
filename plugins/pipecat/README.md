@@ -1,6 +1,6 @@
 # pipecat-shunyalabs
 
-[![PyPI](https://img.shields.io/pypi/v/pipecat-shunyalabs.svg)](https://pypi.org/project/pipecat-shunyalabs/)
+[![PyPI](https://img.shields.io/pypi/v/pipecat-shunyalabsai.svg)](https://pypi.org/project/pipecat-shunyalabsai/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](../../LICENSE)
 
 [Shunyalabs](https://shunyalabs.ai) STT and TTS services for [Pipecat](https://github.com/pipecat-ai/pipecat).
@@ -21,14 +21,14 @@ Provides `ShunyalabsSTTService` and `ShunyalabsTTSService` that integrate with P
 **Requirements:** Python 3.9+, Pipecat framework, a valid Shunyalabs API key.
 
 ```bash
-pip install pipecat-shunyalabs
+pip install pipecat-shunyalabsai
 ```
 
 Install with a transport:
 
 ```bash
 # Daily WebRTC transport
-pip install pipecat-shunyalabs pipecat-ai[daily]
+pip install pipecat-shunyalabsai pipecat-ai[daily]
 ```
 
 ## Authentication
@@ -379,7 +379,7 @@ except ShunyalabsError as e:
 | TTS audio silent or missing       | Ensure `output_format=pcm` matches transport output. Verify `TTSStartedFrame` is received. |
 | High latency on first TTS chunk   | Deploy closer to the Shunyalabs gateway region (`asia-south1`).                            |
 | `RateLimitError`                  | Implement exponential backoff. Check `e.retry_after`.                                      |
-| `ImportError: pipecat_shunyalabs` | Run `pip install pipecat-shunyalabs`. Confirm virtual environment is activated.            |
+| `ImportError: pipecat_shunyalabs` | Run `pip install pipecat-shunyalabsai`. Confirm virtual environment is activated.            |
 
 ---
 

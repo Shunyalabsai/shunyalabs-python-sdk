@@ -1,6 +1,6 @@
 # livekit-plugins-shunyalabs
 
-[![PyPI](https://img.shields.io/pypi/v/livekit-plugins-shunyalabs.svg)](https://pypi.org/project/livekit-plugins-shunyalabs/)
+[![PyPI](https://img.shields.io/pypi/v/livekit-plugins-shunyalabsai.svg)](https://pypi.org/project/livekit-plugins-shunyalabsai/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](../../LICENSE)
 
 [Shunyalabs](https://shunyalabs.ai) STT and TTS plugin for [LiveKit Agents](https://docs.livekit.io/agents/).
@@ -10,7 +10,7 @@ Provides `STT` (speech-to-text) and `TTS` (text-to-speech) classes that integrat
 ## Installation
 
 ```bash
-pip install livekit-plugins-shunyalabs
+pip install livekit-plugins-shunyalabsai
 ```
 
 ## Authentication
