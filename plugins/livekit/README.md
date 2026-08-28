@@ -1,6 +1,6 @@
 # livekit-plugins-shunyalabs
 
-[![PyPI](https://img.shields.io/pypi/v/livekit-plugins-shunyalabs.svg)](https://pypi.org/project/livekit-plugins-shunyalabs/)
+[![PyPI](https://img.shields.io/pypi/v/livekit-plugins-shunyalabsai.svg)](https://pypi.org/project/livekit-plugins-shunyalabsai/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](../../LICENSE)
 
 [Shunyalabs](https://shunyalabs.ai) STT and TTS plugin for [LiveKit Agents](https://docs.livekit.io/agents/).
@@ -10,7 +10,7 @@ Provides `STT` (speech-to-text) and `TTS` (text-to-speech) classes that integrat
 ## Installation
 
 ```bash
-pip install livekit-plugins-shunyalabs
+pip install livekit-plugins-shunyalabsai
 ```
 
 ## Authentication
@@ -231,6 +231,30 @@ tts_english = shunyalabs.TTS(
     style="<Conversational>",
 )
 ```
+
+---
+
+## Custom endpoints
+
+The services can be repointed **without changing code or upgrading the package**.
+Resolution precedence: **explicit argument → endpoint returned by the token service
+→ environment variable → built-in default.**
+
+```bash
+export SHUNYALABS_ASR_URL="https://<host>"          # batch
+export SHUNYALABS_ASR_WS_URL="wss://<host>/v1/realtime"   # streaming
+export SHUNYALABS_TTS_URL="https://<host>"
+export SHUNYALABS_TTS_WS_URL="wss://<host>/v1/realtime"
+```
+
+```python
+# or explicitly per instance
+stt = shunyalabs.STT(api_url="https://<host>", ws_url="wss://<host>/v1/realtime")
+tts = shunyalabs.TTS(api_url="https://<host>", ws_url="wss://<host>/v1/realtime")
+```
+
+If the token service returns an `endpoints` object, the SDK uses it automatically —
+so Shunya Labs can move an endpoint centrally with no change on your side.
 
 ---
 

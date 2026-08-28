@@ -1,25 +1,25 @@
 # Shunyalabs Python SDK
 
-[![PyPI](https://img.shields.io/pypi/v/shunyalabs.svg)](https://pypi.org/project/shunyalabs/)
-[![Python](https://img.shields.io/pypi/pyversions/shunyalabs.svg)](https://pypi.org/project/shunyalabs/)
+[![PyPI](https://img.shields.io/pypi/v/shunyalabsai.svg)](https://pypi.org/project/shunyalabsai/)
+[![Python](https://img.shields.io/pypi/pyversions/shunyalabsai.svg)](https://pypi.org/project/shunyalabsai/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
 The official Python SDK for [Shunyalabs](https://shunyalabs.ai) Speech AI APIs — **ASR** (speech-to-text) and **TTS** (text-to-speech).
 
-Supports HTTP batch and WebSocket streaming modes with a fully async client.  
+Supports HTTP batch and WebSocket streaming modes with a fully async client.
 
 ## Installation
 
 ```bash
-pip install shunyalabs[all]
+pip install shunyalabsai[all]
 ```
 
 Install only what you need:
 
 ```bash
-pip install shunyalabs[ASR]     # Speech-to-text only
-pip install shunyalabs[TTS]     # Text-to-speech only
-pip install shunyalabs[extras]  # Audio playback helpers (sounddevice)
+pip install shunyalabsai[ASR]     # Speech-to-text only
+pip install shunyalabsai[TTS]     # Text-to-speech only
+pip install shunyalabsai[extras]  # Audio playback helpers (sounddevice)
 ```
 
 ## Authentication
@@ -34,7 +34,7 @@ client = AsyncShunyaClient(api_key="your-api-key")
 
 Or set the `SHUNYALABS_API_KEY` environment variable and omit `api_key=`.
 
----    
+---
 
 ## Quick Start
 
@@ -1063,7 +1063,7 @@ A complete integration walkthrough from installation to parsing the response.
 ### Step 1 — Install the SDK
 
 ```bash
-pip install shunyalabs[all]
+pip install shunyalabsai[all]
 ```
 
 ### Step 2 — Authenticate

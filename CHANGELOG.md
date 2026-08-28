@@ -2,13 +2,13 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
-## [shunyalabs 3.0.4 · pipecat-shunyalabs 1.2.0 · livekit-plugins-shunyalabs 1.0.2] - 2026-08-27
+## [shunyalabsai 1.0.0 · pipecat-shunyalabsai 1.0.0 · livekit-plugins-shunyalabsai 1.0.0] - 2026-08-28
 
 Real-time services cutover. ASR and TTS now run on the v2 real-time gateways
 with token-based authentication. **Upgrade all three packages together** — the
-plugins require `shunyalabs>=3.0.4`.
+plugins require `shunyalabsai>=1.0.0`.
 
-### Changed — core (`shunyalabs` 3.0.4)
+### Changed — core (`shunyalabsai` 1.0.0)
 
 - **Token authentication.** You still provide only your API key; the SDK now
   exchanges it for a short-lived access token automatically and keeps it
@@ -20,6 +20,9 @@ plugins require `shunyalabs>=3.0.4`.
   `SHUNYALABS_*` env vars) as before.
 - **Streaming TTS** speaks over the `/v1/realtime` protocol and delivers raw PCM
   (24 kHz, 16-bit mono).
+- **Configurable endpoints.** URLs resolve by precedence: explicit arg → endpoint
+  returned by the token service (an `endpoints` object, used automatically if present)
+  → `SHUNYALABS_{ASR,TTS}_URL` / `_WS_URL` env vars → built-in default.
 
 ### Fixed — core
 
@@ -27,11 +30,10 @@ plugins require `shunyalabs>=3.0.4`.
 - **Batch ASR** now returns `detected_language` **and** `detected_language_name`,
   and correctly parses the transcription response.
 
-### Changed — Pipecat (`pipecat-shunyalabs` 1.2.0)
+### Changed — Pipecat (`pipecat-shunyalabsai` 1.0.0)
 
-Supersedes the `1.1.x` line, which ran on the legacy gateway. `1.2.0` moves to
-the v2 real-time service while keeping the production-quality streaming
-behaviour.
+First release of the `pipecat-shunyalabsai` distribution (fresh package name;
+functionally identical to the tested cutover build).
 
 - New real-time endpoints and token auth (via the core SDK).
 - TTS runs over a **persistent** WebSocket session — each turn speaks with a
@@ -47,7 +49,7 @@ behaviour.
   stream is always PCM at natural rate; container formats and speed control are
   batch REST API features.
 
-### Fixed — LiveKit (`livekit-plugins-shunyalabs` 1.0.2)
+### Fixed — LiveKit (`livekit-plugins-shunyalabsai` 1.0.0)
 
 - New real-time endpoints and token auth (via the core SDK).
 - **TTS `sample_rate` default is now 24000** (was 16000). The gateway emits
