@@ -85,7 +85,7 @@ class ShunyalabsTTSService(TTSService):
         self,
         *,
         api_key: Optional[str] = None,
-        url: str = _DEFAULT_WS_URL,
+        url: Optional[str] = None,
         model: str = "zero-indic",
         voice: str = "Rajesh",
         style: Optional[str] = None,
@@ -105,7 +105,8 @@ class ShunyalabsTTSService(TTSService):
         if not self._api_key:
             raise ValueError("Missing SHUNYALABS_API_KEY")
 
-        self._ws_url = url
+        # explicit arg -> env var -> built-in default (repoint without a code change)
+        self._ws_url = url or os.environ.get("SHUNYALABS_TTS_WS_URL") or _DEFAULT_WS_URL
         self._model = model
         self._voice = voice
         self._style = style

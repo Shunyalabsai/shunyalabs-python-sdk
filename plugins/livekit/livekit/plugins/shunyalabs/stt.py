@@ -77,8 +77,8 @@ class STT(stt.STT):
         *,
         api_key: Optional[str] = None,
         language: str = "auto",
-        api_url: str = _DEFAULT_API_URL,
-        ws_url: str = _DEFAULT_WS_URL,
+        api_url: Optional[str] = None,
+        ws_url: Optional[str] = None,
     ) -> None:
         super().__init__(
             capabilities=STTCapabilities(
@@ -93,8 +93,9 @@ class STT(stt.STT):
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
         self._language = language
-        self._api_url = api_url.rstrip("/")
-        self._ws_url = ws_url
+        # explicit arg -> env var -> built-in default (repoint without a code change)
+        self._api_url = (api_url or os.environ.get("SHUNYALABS_ASR_URL") or _DEFAULT_API_URL).rstrip("/")
+        self._ws_url = ws_url or os.environ.get("SHUNYALABS_ASR_WS_URL") or _DEFAULT_WS_URL
         self._auth = TokenAuth(self._api_key)
 
     @property

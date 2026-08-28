@@ -77,8 +77,8 @@ class TTS(tts.TTS):
         self,
         *,
         api_key: Optional[str] = None,
-        api_url: str = _DEFAULT_API_URL,
-        ws_url: str = _DEFAULT_WS_URL,
+        api_url: Optional[str] = None,
+        ws_url: Optional[str] = None,
         model: str = "zero-indic",
         voice: str = "Rajesh",
         style: Optional[str] = None,
@@ -97,8 +97,9 @@ class TTS(tts.TTS):
             raise ValueError(
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
-        self._api_url = api_url.rstrip("/")
-        self._ws_url = ws_url
+        # explicit arg -> env var -> built-in default (repoint without a code change)
+        self._api_url = (api_url or os.environ.get("SHUNYALABS_TTS_URL") or _DEFAULT_API_URL).rstrip("/")
+        self._ws_url = ws_url or os.environ.get("SHUNYALABS_TTS_WS_URL") or _DEFAULT_WS_URL
         self._model = model
         self._voice = voice
         self._style = style

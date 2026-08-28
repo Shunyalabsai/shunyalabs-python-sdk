@@ -131,7 +131,7 @@ class ShunyalabsSTTService(STTService):
         *,
         api_key: Optional[str] = None,
         language: str = "auto",
-        url: str = _DEFAULT_WS_URL,
+        url: Optional[str] = None,
         sample_rate: int = 16000,
         min_send_bytes: int = _MIN_SEND_BYTES,
         **kwargs,
@@ -146,7 +146,8 @@ class ShunyalabsSTTService(STTService):
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
         self._language = language
-        self._ws_url = url
+        # explicit arg -> env var -> built-in default (repoint without a code change)
+        self._ws_url = url or os.environ.get("SHUNYALABS_ASR_WS_URL") or _DEFAULT_WS_URL
         self._sample_rate = sample_rate
         self._auth = TokenAuth(self._api_key)
         self._conn: Optional[ASRStreamingConnection] = None
