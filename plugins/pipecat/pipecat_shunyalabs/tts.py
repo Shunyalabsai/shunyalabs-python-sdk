@@ -58,7 +58,7 @@ try:
 except ImportError:
     _TTSSettings = None
 
-from shunyalabs._core._auth import TokenAuth
+from shunyalabs._core._auth import TokenAuth, resolve_endpoint
 from shunyalabs._core._exceptions import SynthesisError
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs._core._ws_transport import WsTransport
@@ -105,8 +105,11 @@ class ShunyalabsTTSService(TTSService):
         if not self._api_key:
             raise ValueError("Missing SHUNYALABS_API_KEY")
 
-        # explicit arg -> env var -> built-in default (repoint without a code change)
-        self._ws_url = url or os.environ.get("SHUNYALABS_TTS_WS_URL") or _DEFAULT_WS_URL
+        # explicit arg -> env var -> built-in default; the token-provided endpoint
+        # (if the service returns one) is folded in at connect time.
+        self._url_arg = url
+        self._ws_url = resolve_endpoint(arg=url, server=None,
+                                        env_var="SHUNYALABS_TTS_WS_URL", default=_DEFAULT_WS_URL)
         self._model = model
         self._voice = voice
         self._style = style
@@ -134,6 +137,11 @@ class ShunyalabsTTSService(TTSService):
         return f"{self._style} {text}" if self._style else text
 
     async def _open_transport(self) -> WsTransport:
+        # arg -> token-provided endpoint -> env var -> default (re-resolved each
+        # connect so a control-plane endpoint change is picked up with no release).
+        self._ws_url = resolve_endpoint(
+            arg=self._url_arg, server=(await self._auth.aget_endpoints()).get("tts_ws"),
+            env_var="SHUNYALABS_TTS_WS_URL", default=_DEFAULT_WS_URL)
         transport = WsTransport(
             url=self._ws_url,
             auth=self._auth,

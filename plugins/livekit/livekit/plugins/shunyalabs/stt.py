@@ -47,7 +47,7 @@ from livekit.agents.stt import (
     SpeechEventType,
 )
 
-from shunyalabs._core._auth import TokenAuth
+from shunyalabs._core._auth import TokenAuth, resolve_endpoint
 from shunyalabs._core._http_transport import AsyncHttpTransport
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._batch import AsyncBatchASR
@@ -94,8 +94,12 @@ class STT(stt.STT):
             )
         self._language = language
         # explicit arg -> env var -> built-in default (repoint without a code change)
-        self._api_url = (api_url or os.environ.get("SHUNYALABS_ASR_URL") or _DEFAULT_API_URL).rstrip("/")
-        self._ws_url = ws_url or os.environ.get("SHUNYALABS_ASR_WS_URL") or _DEFAULT_WS_URL
+        self._api_url_arg = api_url
+        self._ws_url_arg = ws_url
+        self._api_url = resolve_endpoint(arg=api_url, server=None,
+                                         env_var="SHUNYALABS_ASR_URL", default=_DEFAULT_API_URL).rstrip("/")
+        self._ws_url = resolve_endpoint(arg=ws_url, server=None,
+                                        env_var="SHUNYALABS_ASR_WS_URL", default=_DEFAULT_WS_URL)
         self._auth = TokenAuth(self._api_key)
 
     @property
@@ -119,6 +123,14 @@ class STT(stt.STT):
             language=lang,
         )
 
+    async def _resolve_urls(self) -> None:
+        """arg -> token-provided endpoint -> env var -> default (folded in at use time)."""
+        eps = await self._auth.aget_endpoints()
+        self._api_url = resolve_endpoint(arg=self._api_url_arg, server=eps.get("asr_http"),
+                                         env_var="SHUNYALABS_ASR_URL", default=_DEFAULT_API_URL).rstrip("/")
+        self._ws_url = resolve_endpoint(arg=self._ws_url_arg, server=eps.get("asr_ws"),
+                                        env_var="SHUNYALABS_ASR_WS_URL", default=_DEFAULT_WS_URL)
+
     async def _recognize_impl(
         self,
         buffer: utils.AudioBuffer,
@@ -141,6 +153,7 @@ class STT(stt.STT):
         wav_buf.seek(0)
         wav_buf.name = "audio.wav"
 
+        await self._resolve_urls()
         transport = AsyncHttpTransport(
             url=self._api_url,
             auth=self._auth,
@@ -189,6 +202,7 @@ class STTStream(RecognizeStream):
         self._language = language
 
     async def _run(self) -> None:
+        await self._stt._resolve_urls()
         streaming = AsyncStreamingASR(
             auth=self._stt._auth,
             ws_url=self._stt._ws_url,

@@ -48,17 +48,17 @@ class ClientConfig:
             )
         return key
 
-    def resolve_asr_url(self) -> str:
-        return self.asr_url or os.environ.get("SHUNYALABS_ASR_URL") or self._DEFAULT_ASR_URL
+    def resolve_asr_url(self, server: Optional[str] = None) -> str:
+        return self.asr_url or server or os.environ.get("SHUNYALABS_ASR_URL") or self._DEFAULT_ASR_URL
 
-    def resolve_asr_ws_url(self) -> str:
-        return self.asr_ws_url or os.environ.get("SHUNYALABS_ASR_WS_URL") or self._DEFAULT_ASR_WS_URL
+    def resolve_asr_ws_url(self, server: Optional[str] = None) -> str:
+        return self.asr_ws_url or server or os.environ.get("SHUNYALABS_ASR_WS_URL") or self._DEFAULT_ASR_WS_URL
 
-    def resolve_tts_url(self) -> str:
-        return self.tts_url or os.environ.get("SHUNYALABS_TTS_URL") or self._DEFAULT_TTS_URL
+    def resolve_tts_url(self, server: Optional[str] = None) -> str:
+        return self.tts_url or server or os.environ.get("SHUNYALABS_TTS_URL") or self._DEFAULT_TTS_URL
 
-    def resolve_tts_ws_url(self) -> str:
-        return self.tts_ws_url or os.environ.get("SHUNYALABS_TTS_WS_URL") or self._DEFAULT_TTS_WS_URL
+    def resolve_tts_ws_url(self, server: Optional[str] = None) -> str:
+        return self.tts_ws_url or server or os.environ.get("SHUNYALABS_TTS_WS_URL") or self._DEFAULT_TTS_WS_URL
 
     def resolve_flow_url(self) -> str:
         return self.flow_url or os.environ.get("SHUNYALABS_FLOW_URL") or self._DEFAULT_FLOW_URL
