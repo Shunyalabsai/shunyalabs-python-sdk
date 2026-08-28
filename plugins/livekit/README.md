@@ -234,6 +234,30 @@ tts_english = shunyalabs.TTS(
 
 ---
 
+## Custom endpoints
+
+The services can be repointed **without changing code or upgrading the package**.
+Resolution precedence: **explicit argument → endpoint returned by the token service
+→ environment variable → built-in default.**
+
+```bash
+export SHUNYALABS_ASR_URL="https://<host>"          # batch
+export SHUNYALABS_ASR_WS_URL="wss://<host>/v1/realtime"   # streaming
+export SHUNYALABS_TTS_URL="https://<host>"
+export SHUNYALABS_TTS_WS_URL="wss://<host>/v1/realtime"
+```
+
+```python
+# or explicitly per instance
+stt = shunyalabs.STT(api_url="https://<host>", ws_url="wss://<host>/v1/realtime")
+tts = shunyalabs.TTS(api_url="https://<host>", ws_url="wss://<host>/v1/realtime")
+```
+
+If the token service returns an `endpoints` object, the SDK uses it automatically —
+so Shunya Labs can move an endpoint centrally with no change on your side.
+
+---
+
 ## License
 
 [MIT](../../LICENSE)

@@ -383,6 +383,29 @@ except ShunyalabsError as e:
 
 ---
 
+## Custom endpoints
+
+The services can be repointed **without changing code or upgrading the package**.
+Resolution precedence: **explicit argument → endpoint returned by the token service
+→ environment variable → built-in default.**
+
+```bash
+# environment variables (streaming = WS, batch = HTTP)
+export SHUNYALABS_ASR_WS_URL="wss://<host>/v1/realtime"
+export SHUNYALABS_TTS_WS_URL="wss://<host>/v1/realtime"
+```
+
+```python
+# or explicitly per instance
+stt = ShunyalabsSTTService(url="wss://<host>/v1/realtime")
+tts = ShunyalabsTTSService(url="wss://<host>/v1/realtime")
+```
+
+If the token service returns an `endpoints` object, the SDK uses it automatically —
+so Shunya Labs can move an endpoint centrally with no change on your side.
+
+---
+
 ## License
 
 [MIT](../../LICENSE)
