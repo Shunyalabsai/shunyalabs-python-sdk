@@ -43,7 +43,7 @@ async def main() -> None:
 
     stt = ShunyalabsSTTService(
         api_key=os.environ["SHUNYALABS_API_KEY"],
-        language="auto",
+        language="hi",  # set your language; "auto" works but is best-effort on streaming
     )
 
     llm = OpenAILLMService(

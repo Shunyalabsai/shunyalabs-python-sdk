@@ -146,6 +146,17 @@ class ShunyalabsSTTService(STTService):
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
         self._language = language
+        # `auto` is accepted, but a live stream must commit to a language from the opening
+        # seconds of audio -- well before the detector has enough signal to be sure. A voice
+        # agent almost always knows its language up front, and passing it removes a real
+        # source of wrong-script transcripts on the first turns. Warn rather than refuse:
+        # `auto` is legitimate when the language genuinely is unknown.
+        if str(language).strip().lower() in ("", "auto"):
+            logger.warning(
+                "ShunyalabsSTTService: language=%r. Streaming language detection is "
+                "best-effort because it must decide from the first seconds of audio. "
+                "Pass language='hi' (or the relevant code) for reliable results.", language
+            )
         # explicit arg -> env var -> built-in default; the token-provided endpoint
         # (if the service returns one) is folded in at connect time.
         self._url_arg = url
@@ -234,6 +245,21 @@ class ShunyalabsSTTService(STTService):
 
             @self._conn.on(StreamingMessageType.FINAL)
             def on_final(msg):
+                if msg.text:
+                    _schedule(self.push_frame(
+                        TranscriptionFrame(
+                            text=msg.text,
+                            user_id="",
+                            timestamp=str(time.time()),
+                            language=_to_language(msg.language),
+                        )
+                    ))
+
+            @self._conn.on(StreamingMessageType.FINAL_REFINED)
+            def on_final_refined(msg):
+                # Code-switch refinement of a segment already delivered as FINAL. Raw finals
+                # are never held back waiting for this, so it arrives afterwards and is pushed
+                # as its own transcription rather than being dropped.
                 if msg.text:
                     _schedule(self.push_frame(
                         TranscriptionFrame(

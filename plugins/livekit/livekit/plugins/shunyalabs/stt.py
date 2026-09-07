@@ -93,6 +93,15 @@ class STT(stt.STT):
                 "Shunyalabs API key required. Pass api_key= or set SHUNYALABS_API_KEY."
             )
         self._language = language
+        if str(language).strip().lower() in ("", "auto"):
+            # See the pipecat plugin: streaming detection must decide from the opening
+            # seconds of audio, so it is best-effort. Warn, do not refuse -- `auto` is
+            # legitimate when the language genuinely is unknown.
+            logger.warning(
+                "Shunyalabs STT: language=%r. Streaming language detection is "
+                "best-effort because it must decide from the first seconds of audio. "
+                "Pass an explicit language code for reliable results.", language
+            )
         # explicit arg -> env var -> built-in default (repoint without a code change)
         self._api_url_arg = api_url
         self._ws_url_arg = ws_url

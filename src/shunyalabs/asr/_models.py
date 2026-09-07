@@ -130,7 +130,7 @@ class TranscriptionResult(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Streaming models  (WS /ws)
+# Streaming models  (WS /v1/realtime)
 # ---------------------------------------------------------------------------
 
 
@@ -139,6 +139,18 @@ class StreamingConfig(BaseModel):
 
     Authentication is handled via the ``Authorization`` header on the
     WebSocket connection, not in the JSON payload.
+
+    ``language`` defaults to ``"auto"``, which is accepted -- but **set it explicitly
+    whenever you know it.** A live stream has to commit to a language from the opening
+    seconds of audio, long before the detector has enough signal to be sure, so
+    detection here is best-effort in a way batch transcription is not. For a voice
+    agent the language is nearly always known up front, and passing it removes an
+    avoidable source of wrong-script transcripts on the first turns of a call.
+
+    ``dtype``, ``chunk_size_sec`` and ``silence_threshold_sec`` are carried over from
+    the older gateway and are ignored by ``/v1/realtime``, which endpoints on its own
+    VAD. They are kept so existing callers do not break, but setting them changes
+    nothing -- do not reach for them to tune latency.
     """
 
     language: str = "auto"
@@ -160,10 +172,16 @@ class StreamingMessageType(str, Enum):
 
     READY = "ready"
     PARTIAL = "partial"
-    FINAL_SEGMENT = "final_segment"
     FINAL = "final"
-    DONE = "done"
+    # Emitted after a `final` when code-switch refinement is enabled: the same segment,
+    # re-rendered in correct scripts. It arrives separately so a raw final is never delayed
+    # waiting for it. Subscribe to it or the refinement is silently discarded.
+    FINAL_REFINED = "final_refined"
     ERROR = "error"
+    # Older gateway only -- /v1/realtime never sends these. Kept so existing subscriptions
+    # keep importing, but a handler registered on them will never fire.
+    FINAL_SEGMENT = "final_segment"
+    DONE = "done"
 
 
 class StreamingPartial(BaseModel):

@@ -28,7 +28,7 @@ async def entrypoint(ctx: JobContext) -> None:
     await ctx.connect(auto_subscribe=AutoSubscribe.AUDIO_ONLY)
 
     session = AgentSession(
-        stt=shunyalabs.STT(language="auto"),   # auto-detects language
+        stt=shunyalabs.STT(language="hi"),   # set your language; "auto" works but is best-effort
         llm=openai.LLM(model="gpt-4o-mini"),
         tts=openai.TTS(voice="alloy"),
         vad=silero.VAD.load(),
