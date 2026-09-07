@@ -1,7 +1,7 @@
 """Pydantic models for the Shunyalabs ASR module.
 
 Covers both the batch HTTP API (POST /v1/transcriptions) and the
-real-time streaming WebSocket API (WS /ws).  Every field mirrors the
+real-time streaming WebSocket API (WS /v1/realtime).  Every field mirrors the
 ASR Gateway schema so that round-tripping is lossless.
 """
 

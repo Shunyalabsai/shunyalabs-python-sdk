@@ -2,6 +2,46 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [shunyalabsai 1.0.1 · pipecat-shunyalabsai 1.0.1 · livekit-plugins-shunyalabsai 1.0.1] - 2026-09-08
+
+A correctness fix in the Pipecat plugin, plus documentation that stops three settings
+looking like something they are not. **`pipecat-shunyalabsai` 1.0.1 requires
+`shunyalabsai>=1.0.1`** — it subscribes to an event the older core does not define.
+
+### Fixed — Pipecat (`pipecat-shunyalabsai` 1.0.1)
+
+- **Code-switch refinements were being discarded.** When the service re-renders a
+  finalized segment in the correct scripts it sends a separate `final_refined` event.
+  The plugin had no handler for it, so the improved text was dropped — while it *did*
+  register a handler for `final_segment`, which `/v1/realtime` never sends and which
+  therefore could never fire. Refinements now arrive as their own transcription.
+
+### Changed — core (`shunyalabsai` 1.0.1)
+
+- **`StreamingMessageType.FINAL_REFINED` added.** The service emits it; the enum did
+  not list it, so it could not be subscribed to.
+- `FINAL_SEGMENT` and `DONE` are documented as legacy. They remain importable, but
+  `/v1/realtime` never sends them and a handler on either can never fire.
+- **`dtype`, `chunk_size_sec` and `silence_threshold_sec` are documented as inert.**
+  They are accepted and ignored — the real-time endpoint endpoints on its own VAD.
+  They read like latency controls and are not; nothing about them has changed, only
+  the docstring that now says so.
+- `StreamingConfig` was headed `WS /ws`; corrected to `/v1/realtime`.
+
+### Changed — both plugins
+
+- **`language="auto"` now warns once at construction.** It stays the default and stays
+  supported, but a live stream must commit to a language from the opening seconds of
+  audio, so detection there is best-effort in a way batch transcription is not. For a
+  voice agent the language is nearly always known in advance, and passing it removes an
+  avoidable source of wrong-script transcripts on the first turns of a call. The LiveKit
+  example previously annotated it `# auto-detects language`, which oversold it; both
+  examples now pass an explicit language.
+
+`livekit-plugins-shunyalabsai` still requires only `shunyalabsai>=1.0.0` — its change
+uses nothing new from the core.
+
+
 ## [shunyalabsai 1.0.0 · pipecat-shunyalabsai 1.0.0 · livekit-plugins-shunyalabsai 1.0.0] - 2026-08-28
 
 Real-time services cutover. ASR and TTS now run on the v2 real-time gateways
