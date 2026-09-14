@@ -221,3 +221,87 @@ class TestShortUtterancesOpenATurn:
         # re-endpointing would manufacture turns every ~800 ms.
         head = final_src.split("had_partials")[0]
         assert "if not msg.text" in head and "return" in head
+
+
+class TestTheTurnLatchIsAtomic:
+    """`final` and `utterance_end` must not both close the same turn.
+
+    They arrive about a millisecond apart, in an order the gateway does not
+    guarantee, and they are dispatched from callbacks that do not run on the
+    event loop. With a plain read-then-write guard both could observe the latch
+    open and both emit a stop frame -- measured against production on roughly
+    60% of short utterances: one UserStartedSpeakingFrame and TWO
+    UserStoppedSpeakingFrame.
+    """
+
+    def _svc(self):
+        from pipecat_shunyalabs.stt import ShunyalabsSTTService
+
+        return ShunyalabsSTTService(api_key="test-key", language="en",
+                                    emit_turn_frames=True)
+
+    def test_only_one_caller_can_open_a_turn(self):
+        svc = self._svc()
+        assert svc._open_turn() is True
+        assert svc._open_turn() is False, "a second opener must not re-arm the turn"
+
+    def test_only_one_caller_can_close_a_turn(self):
+        svc = self._svc()
+        svc._open_turn()
+        assert svc._close_turn() is True
+        assert svc._close_turn() is False, \
+            "the second closer is the double stop frame; it must be refused"
+
+    def test_closing_an_open_turn_twice_under_contention(self):
+        # Drive the actual race: many threads racing to close one turn. Exactly
+        # one must win, however the interleaving falls.
+        import threading
+
+        svc = self._svc()
+        svc._open_turn()
+        wins = []
+        barrier = threading.Barrier(8)
+
+        def go():
+            barrier.wait()
+            if svc._close_turn():
+                wins.append(1)
+
+        threads = [threading.Thread(target=go) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sum(wins) == 1, f"{sum(wins)} callers closed the same turn"
+
+    def test_opening_under_contention(self):
+        import threading
+
+        svc = self._svc()
+        wins = []
+        barrier = threading.Barrier(8)
+
+        def go():
+            barrier.wait()
+            if svc._open_turn():
+                wins.append(1)
+
+        threads = [threading.Thread(target=go) for _ in range(8)]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
+        assert sum(wins) == 1, f"{sum(wins)} callers opened the same turn"
+
+    def test_the_latch_is_never_touched_directly(self):
+        # Every read-then-write has to go through the helpers, or the race
+        # comes back at whichever site was missed.
+        import inspect
+        import re
+
+        from pipecat_shunyalabs import stt
+
+        src = inspect.getsource(stt)
+        writes = re.findall(r"self\._speaking\s*=", src)
+        # Only the initialiser and the two helpers may assign it.
+        assert len(writes) == 3, f"unexpected direct latch writes: {len(writes)}"

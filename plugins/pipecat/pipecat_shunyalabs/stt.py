@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import os
 import time
 from typing import AsyncGenerator, Optional
@@ -244,6 +245,15 @@ class ShunyalabsSTTService(STTService):
         # True between the first partial of an utterance and its utterance_end,
         # so the start/stop frames are emitted as matched pairs.
         self._speaking = False
+        # The latch is read-then-written from gateway callbacks that do not run
+        # on the event loop, and `final` and `utterance_end` arrive about a
+        # millisecond apart in an order the gateway does not guarantee. A plain
+        # `if self._speaking:` guard is therefore not atomic: both handlers can
+        # observe True and both close the turn, which produced one start frame
+        # and TWO stop frames on roughly 60% of short utterances. Compare and
+        # set instead, so exactly one caller can open or close a turn whatever
+        # the interleaving.
+        self._turn_lock = threading.Lock()
         # Serialize reconnects so a burst of audio frames arriving while the
         # socket is down cannot spawn several concurrent reconnect attempts.
         self._reconnect_lock = asyncio.Lock()
@@ -263,6 +273,22 @@ class ShunyalabsSTTService(STTService):
     async def cancel(self, frame: CancelFrame) -> None:
         await self._disconnect()
         await super().cancel(frame)
+
+    def _open_turn(self) -> bool:
+        """Claim the turn. True only for the caller that actually opened it."""
+        with self._turn_lock:
+            if self._speaking:
+                return False
+            self._speaking = True
+            return True
+
+    def _close_turn(self) -> bool:
+        """Release the turn. True only for the caller that actually closed it."""
+        with self._turn_lock:
+            if not self._speaking:
+                return False
+            self._speaking = False
+            return True
 
     async def _connect(self) -> None:
         """Open a streaming ASR connection via the SDK."""
@@ -326,8 +352,7 @@ class ShunyalabsSTTService(STTService):
                 # only as prompt as `decode_every_ms` (640 ms by default), which is
                 # fine for turn-taking but too slow to drive barge-in -- keep a
                 # transport VAD for that.
-                if self._emit_turn_frames and not self._speaking:
-                    self._speaking = True
+                if self._emit_turn_frames and self._open_turn():
                     _schedule(self.push_frame(UserStartedSpeakingFrame()))
                 _schedule(self.push_frame(
                     InterimTranscriptionFrame(
@@ -349,8 +374,7 @@ class ShunyalabsSTTService(STTService):
                 # end_of_utterance is true, so it is absent when the gateway cut a
                 # segment at its maximum length -- which is what makes it usable as
                 # a turn boundary where a bare `final` is not.
-                if self._emit_turn_frames and self._speaking:
-                    self._speaking = False
+                if self._emit_turn_frames and self._close_turn():
                     _schedule(self.push_frame(UserStoppedSpeakingFrame()))
 
             @self._conn.on(StreamingMessageType.FINAL)
@@ -371,9 +395,11 @@ class ShunyalabsSTTService(STTService):
                 #
                 # Short answers are exactly the ones that matter -- "five",
                 # "yes", "no", "tomorrow" -- so this is not an edge case.
-                had_partials = self._speaking
-                if self._emit_turn_frames and not had_partials:
-                    self._speaking = True
+                # `_open_turn` returns False when a partial already opened
+                # this turn, which is the same decision the old `had_partials`
+                # read made -- but taken atomically.
+                opened = self._emit_turn_frames and self._open_turn()
+                if opened:
                     _schedule(self.push_frame(UserStartedSpeakingFrame()))
 
                 _schedule(self.push_frame(
@@ -385,12 +411,13 @@ class ShunyalabsSTTService(STTService):
                     )
                 ))
 
-                if self._emit_turn_frames and not had_partials:
+                if opened and self._close_turn():
                     # Nothing preceded this final, so it IS the entire turn.
                     # Close it here rather than waiting for utterance_end: the
                     # two are not guaranteed to arrive in a fixed order, and a
-                    # turn left open blocks every later one.
-                    self._speaking = False
+                    # turn left open blocks every later one. The compare-and-set
+                    # means that if utterance_end got there first, it closed the
+                    # turn and this does not emit a second stop frame.
                     _schedule(self.push_frame(UserStoppedSpeakingFrame()))
 
             @self._conn.on(StreamingMessageType.FINAL_REFINED)
@@ -439,8 +466,7 @@ class ShunyalabsSTTService(STTService):
         # Clear the speaking latch. A reconnect mid-utterance would otherwise
         # leave it stuck True, and every subsequent turn-start frame would be
         # suppressed for the life of the pipeline.
-        if self._speaking:
-            self._speaking = False
+        if self._close_turn():
             if self._emit_turn_frames:
                 try:
                     await self.push_frame(UserStoppedSpeakingFrame())
