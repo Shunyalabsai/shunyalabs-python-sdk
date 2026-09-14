@@ -123,22 +123,41 @@ class ShunyalabsSTTService(STTService):
     Transcription events are pushed back as ``TranscriptionFrame`` /
     ``InterimTranscriptionFrame``.
 
-    **Turn-taking.** With ``emit_turn_frames=True`` (the default) the gateway's
-    ``utterance_end`` event is translated into ``UserStoppedSpeakingFrame``, so
-    turn boundaries come from the ASR's own endpointing rather than a second VAD
-    guessing at the same thing from the same audio. Pair it with pipecat's
-    external turn strategies to let this service own the decision::
+    **Turn-taking (opt-in).** With ``emit_turn_frames=True`` the gateway's
+    ``utterance_end`` becomes ``UserStoppedSpeakingFrame`` and the first partial
+    of an utterance becomes ``UserStartedSpeakingFrame``, so turn boundaries come
+    from the ASR's own endpointing instead of a second VAD guessing at the same
+    thing from the same audio.
 
+    **It must be paired with pipecat's external turn strategies**, because only
+    those consume these frames::
+
+        from pipecat.processors.aggregators.llm_response_universal import (
+            LLMContextAggregatorPair, LLMUserAggregatorParams,
+        )
         from pipecat.turns.user_turn_strategies import ExternalUserTurnStrategies
 
-        task = PipelineTask(
-            pipeline,
-            params=PipelineParams(user_turn_strategies=ExternalUserTurnStrategies()),
+        stt = ShunyalabsSTTService(api_key=..., language="en", emit_turn_frames=True)
+
+        agg = LLMContextAggregatorPair(
+            context,
+            user_params=LLMUserAggregatorParams(
+                user_turn_strategies=ExternalUserTurnStrategies(),
+            ),
         )
 
-    Set ``emit_turn_frames=False`` to keep the pre-1.1 behaviour, where this
-    service emits no speaking frames and turn detection is entirely the
-    transport VAD's job.
+    Neither half works alone, which is why this is off by default:
+
+    * ``emit_turn_frames=True`` with the *default* strategies double-counts.
+      Those consume ``VADUserStartedSpeakingFrame`` from the transport, not the
+      public frame, so the aggregator broadcasts its own turn frame and ours
+      passes through as well -- measured at two ``UserStartedSpeakingFrame`` per
+      turn instead of one.
+    * ``ExternalUserTurnStrategies`` with ``emit_turn_frames=False`` yields no
+      turn signal at all, since nothing is left to produce one.
+
+    Left at the default, this service emits no speaking frames and turn detection
+    is entirely the transport VAD's job -- exactly as in 1.0.x.
 
     **Latency.** ``endpoint_silence_ms`` is the dominant control: it is pure
     wall-clock delay after the speaker stops before a final can be emitted.
@@ -162,8 +181,10 @@ class ShunyalabsSTTService(STTService):
         codeswitch: Opt into code-switch refinement (a ``final_refined`` follows
             the ``final`` with correct scripts).
         model: Explicit model/tier. ``None`` lets the gateway route on language.
-        emit_turn_frames: Translate ``utterance_end`` into
-            ``UserStoppedSpeakingFrame``. Default ``True``.
+        emit_turn_frames: Emit ``UserStartedSpeakingFrame`` /
+            ``UserStoppedSpeakingFrame`` from the gateway's own endpointing.
+            Default ``False``; requires ``ExternalUserTurnStrategies`` on the
+            user aggregator. See the note above.
         **kwargs: Forwarded to ``STTService.__init__``.
     """
 
@@ -180,7 +201,7 @@ class ShunyalabsSTTService(STTService):
         vad: Optional[str] = None,
         codeswitch: Optional[bool] = None,
         model: Optional[str] = None,
-        emit_turn_frames: bool = True,
+        emit_turn_frames: bool = False,
         **kwargs,
     ) -> None:
         # Initialize settings for pipecat >=0.0.95 (backward-compatible)

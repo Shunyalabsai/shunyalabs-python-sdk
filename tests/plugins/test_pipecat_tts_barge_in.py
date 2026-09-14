@@ -132,6 +132,36 @@ class TestInterruptionFallsBackSafely:
         assert not svc._transport_lock.locked()
 
 
+class TestSTTDefaultsAreNonBreaking:
+    def test_turn_frames_are_opt_in(self):
+        # Measured: with emit_turn_frames=True and pipecat's DEFAULT turn
+        # strategies, downstream sees two UserStartedSpeakingFrame per turn
+        # instead of one. The default strategies consume
+        # VADUserStartedSpeakingFrame from the transport, not the public frame,
+        # so the aggregator broadcasts its own and ours passes through too.
+        # Only ExternalUserTurnStrategies consumes ours -- so the two settings
+        # go together, and neither may be the silent default.
+        from pipecat_shunyalabs.stt import ShunyalabsSTTService
+
+        svc = ShunyalabsSTTService(api_key="test-key", language="en")
+        assert svc._emit_turn_frames is False
+
+    def test_min_send_bytes_is_100ms_at_16k(self):
+        from pipecat_shunyalabs.stt import ShunyalabsSTTService, _MIN_SEND_BYTES
+
+        svc = ShunyalabsSTTService(api_key="test-key", language="en")
+        assert svc._min_send_bytes == _MIN_SEND_BYTES
+        assert _MIN_SEND_BYTES / (16000 * 2) == 0.1
+
+    def test_tuning_defaults_to_server_side(self):
+        from pipecat_shunyalabs.stt import ShunyalabsSTTService
+
+        svc = ShunyalabsSTTService(api_key="test-key", language="en")
+        assert svc._endpoint_silence_ms is None
+        assert svc._decode_every_ms is None
+        assert svc._vad is None
+
+
 class TestTuningKnobs:
     def test_defaults_are_unchanged(self):
         # WebRTC transports rely on the 480 ms pre-buffer; this release must not

@@ -66,13 +66,29 @@ cores do not define.
 
 ### Added — Pipecat plugin (`pipecat-shunyalabsai` 1.1.0)
 
-- **Turn frames.** `utterance_end` becomes `UserStoppedSpeakingFrame`, and the
-  first partial of an utterance becomes `UserStartedSpeakingFrame`. The service
-  previously emitted neither, so turn detection fell entirely to a transport VAD
-  guessing from the same audio. Pair with pipecat's `ExternalUserTurnStrategies`
-  to let the ASR own the decision. Opt out with `emit_turn_frames=False`.
-  The start frame is only as prompt as `decode_every_ms`, so keep a transport VAD
-  for barge-in, which needs to be faster than turn-taking does.
+- **Turn frames, behind `emit_turn_frames=True` (default off).** `utterance_end`
+  becomes `UserStoppedSpeakingFrame` and the first partial of an utterance
+  becomes `UserStartedSpeakingFrame`, so turn boundaries come from the ASR's own
+  endpointing instead of a transport VAD guessing from the same audio. The
+  service previously emitted neither.
+
+  **This must be paired with `ExternalUserTurnStrategies` on the user
+  aggregator**, and it is off by default because neither half works alone.
+  Measured, with one turn driven through a real pipeline:
+
+  | strategies | `emit_turn_frames` | `UserStartedSpeakingFrame` seen |
+  | ---------- | ------------------ | ------------------------------- |
+  | default    | `False` (1.0.x)    | 1                               |
+  | default    | `True`             | **2 — duplicated**              |
+  | external   | `True`             | 1                               |
+  | external   | `False`            | **0 — no turn signal**          |
+
+  The default strategies consume `VADUserStartedSpeakingFrame` from the
+  transport, not the public frame, so the aggregator broadcasts its own and ours
+  passes through as well.
+
+  Note the start frame is only as prompt as `decode_every_ms`, so keep a
+  transport VAD for barge-in — that needs to be faster than turn-taking does.
 - **`ShunyalabsSTTService.commit()`** — force a turn boundary from your own
   endpointing.
 - **STT tuning arguments**: `endpoint_silence_ms`, `decode_every_ms`, `vad`,
