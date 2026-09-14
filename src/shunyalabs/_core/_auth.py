@@ -12,10 +12,73 @@ Two strategies:
 
 import asyncio
 import os
+import threading
 import time
-from typing import Optional
+from typing import Dict, Optional, Tuple
 
 from ._exceptions import ConfigurationError
+
+
+class _SharedTokenState:
+    """Token state shared by every :class:`TokenAuth` for the same credential.
+
+    A voice pipeline builds one service object per stream -- often one STT and
+    one TTS per concurrent call -- and each used to hold its own token. Fifty
+    concurrent calls therefore meant a hundred mint requests, all on the critical
+    path of call setup. Sharing the state means one mint per credential, refreshed
+    once for everyone.
+    """
+
+    __slots__ = ("token", "expires_at", "endpoints", "_alock", "_alock_loop", "_tlock")
+
+    def __init__(self) -> None:
+        self.token: Optional[str] = None
+        self.expires_at: float = 0.0        # monotonic deadline
+        self.endpoints: dict = {}
+        self._alock: Optional[asyncio.Lock] = None
+        self._alock_loop: Optional[asyncio.AbstractEventLoop] = None
+        self._tlock = threading.Lock()
+
+    def async_lock(self) -> asyncio.Lock:
+        """An asyncio lock bound to the *running* loop.
+
+        Rebuilt if the loop changed: an ``asyncio.Lock`` binds to the first loop
+        that touches it and raises if later used from another, which a
+        process-wide cache would otherwise hit whenever a host runs more than one
+        loop over its lifetime (``asyncio.run`` twice, a test suite, a worker that
+        restarts its loop).
+        """
+        loop = asyncio.get_running_loop()
+        if self._alock is None or self._alock_loop is not loop:
+            self._alock = asyncio.Lock()
+            self._alock_loop = loop
+        return self._alock
+
+    def sync_lock(self) -> threading.Lock:
+        return self._tlock
+
+
+# Keyed by (api_key, mint_url, ttl) so callers asking for different lifetimes, or
+# pointing at different minters, never share a token.
+_TOKEN_STATES: Dict[Tuple[str, str, int], _SharedTokenState] = {}
+_TOKEN_STATES_GUARD = threading.Lock()
+
+
+def _shared_token_state(key: Tuple[str, str, int]) -> _SharedTokenState:
+    state = _TOKEN_STATES.get(key)
+    if state is None:
+        with _TOKEN_STATES_GUARD:
+            state = _TOKEN_STATES.get(key)
+            if state is None:
+                state = _SharedTokenState()
+                _TOKEN_STATES[key] = state
+    return state
+
+
+def reset_token_cache() -> None:
+    """Drop every cached token. For tests and credential rotation."""
+    with _TOKEN_STATES_GUARD:
+        _TOKEN_STATES.clear()
 
 
 class StaticKeyAuth:
@@ -108,14 +171,28 @@ class TokenAuth:
         self._mint_url = mint_url or os.environ.get("SHUNYALABS_AUTH_URL") or self._DEFAULT_MINT_URL
         self._ttl = int(ttl_seconds)
         self._buffer = int(refresh_buffer_seconds)
-        self._token: Optional[str] = None
-        self._expires_at: float = 0.0          # monotonic deadline
-        self._lock = asyncio.Lock()
+        # Token, expiry and endpoints live in process-wide state keyed by the
+        # credential, so N service instances mint once between them rather than
+        # once each. See _SharedTokenState.
+        self._state = _shared_token_state((self._api_key, self._mint_url, self._ttl))
+
+    # The token/expiry/endpoints are shared state; these keep the previous
+    # attribute names readable for anything that reached for them.
+    @property
+    def _token(self) -> Optional[str]:
+        return self._state.token
+
+    @property
+    def _expires_at(self) -> float:
+        return self._state.expires_at
+
+    @property
+    def _endpoints(self) -> dict:
         # Endpoints optionally delivered by the token service, e.g.
         # {"asr_ws": ..., "asr_http": ..., "tts_ws": ..., "tts_http": ...}.
         # Empty until a mint returns them; lets the control plane repoint the
         # data plane without an SDK release.
-        self._endpoints: dict = {}
+        return self._state.endpoints
 
     def __repr__(self) -> str:
         masked = f"{self._api_key[:4]}...{self._api_key[-4:]}" if len(self._api_key) > 8 else "***"
@@ -153,15 +230,15 @@ class TokenAuth:
         token = data.get("token")
         if not token:
             raise ConfigurationError(f"Token mint returned no token: {str(data)[:200]}")
-        self._token = token
-        self._expires_at = time.monotonic() + float(data.get("expires_in") or self._ttl)
+        self._state.token = token
+        self._state.expires_at = time.monotonic() + float(data.get("expires_in") or self._ttl)
         # Optional server-provided data-plane endpoints (absent today; used
         # transparently once the token service starts returning them).
         eps = data.get("endpoints")
-        self._endpoints = eps if isinstance(eps, dict) else {}
+        self._state.endpoints = eps if isinstance(eps, dict) else {}
 
     def _fresh(self) -> bool:
-        return bool(self._token) and time.monotonic() < self._expires_at - self._buffer
+        return bool(self._state.token) and time.monotonic() < self._state.expires_at - self._buffer
 
     def _mint_sync(self) -> None:
         import httpx
@@ -181,20 +258,28 @@ class TokenAuth:
         self._store_token(resp.json())
 
     async def ensure_token(self) -> str:
-        """Return a valid token, minting or refreshing if necessary (async)."""
+        """Return a valid token, minting or refreshing if necessary (async).
+
+        The lock is shared across every instance using this credential, so a
+        burst of concurrent calls produces one mint, not one per instance.
+        """
         if self._fresh():
-            return self._token  # type: ignore[return-value]
-        async with self._lock:
+            return self._state.token  # type: ignore[return-value]
+        async with self._state.async_lock():
             if self._fresh():  # a concurrent caller may have just minted
-                return self._token  # type: ignore[return-value]
+                return self._state.token  # type: ignore[return-value]
             await self._mint()
-        return self._token  # type: ignore[return-value]
+        return self._state.token  # type: ignore[return-value]
 
     def ensure_token_sync(self) -> str:
         """Return a valid token, minting or refreshing synchronously if necessary."""
-        if not self._fresh():
+        if self._fresh():
+            return self._state.token  # type: ignore[return-value]
+        with self._state.sync_lock():
+            if self._fresh():
+                return self._state.token  # type: ignore[return-value]
             self._mint_sync()
-        return self._token  # type: ignore[return-value]
+        return self._state.token  # type: ignore[return-value]
 
     async def aget_auth_headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {await self.ensure_token()}"}
@@ -206,16 +291,16 @@ class TokenAuth:
 
     def endpoints(self) -> dict:
         """Endpoints already delivered by the token service (may be empty until minted)."""
-        return dict(self._endpoints)
+        return dict(self._state.endpoints)
 
     async def aget_endpoints(self) -> dict:
         """Ensure a token (minting if needed) and return any server-provided endpoints."""
         await self.ensure_token()
-        return dict(self._endpoints)
+        return dict(self._state.endpoints)
 
     def get_endpoints_sync(self) -> dict:
         self.ensure_token_sync()
-        return dict(self._endpoints)
+        return dict(self._state.endpoints)
 
 
 def resolve_endpoint(*, arg: Optional[str], server: Optional[str],
@@ -227,4 +312,4 @@ def resolve_endpoint(*, arg: Optional[str], server: Optional[str],
     return arg or server or os.environ.get(env_var) or default
 
 
-__all__ = ["StaticKeyAuth", "TokenAuth", "resolve_endpoint"]
+__all__ = ["StaticKeyAuth", "TokenAuth", "resolve_endpoint", "reset_token_cache"]

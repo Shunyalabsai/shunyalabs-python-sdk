@@ -796,27 +796,63 @@ conn = await client.asr.stream(config=StreamingConfig(
 ))
 ```
 
-**`chunk_size_sec` — Processing window size**
+**`endpoint_silence_ms` — How long to wait before finalising**
+
+This is the setting that decides how long a speaker waits after they stop
+talking, because it is pure wall-clock delay before a `final` can be emitted. If
+turns feel sluggish, look here first.
 
 ```python
-# Smaller chunks = lower latency, more partial results
-conn = await client.asr.stream(config=StreamingConfig(chunk_size_sec=0.5))
+# Snappy turns, for a voice agent
+conn = await client.asr.stream(config=StreamingConfig(
+    language="en",
+    endpoint_silence_ms=300,
+))
 
-# Larger chunks = more context, potentially better accuracy
-conn = await client.asr.stream(config=StreamingConfig(chunk_size_sec=2.0))
+# Patient, for dictation or a speaker who pauses to think
+conn = await client.asr.stream(config=StreamingConfig(
+    language="en",
+    endpoint_silence_ms=1200,
+))
 ```
 
-**`silence_threshold_sec` — Control segment boundaries**
+Lower is not simply better: a speaker who pauses mid-sentence ("a table for…
+four") gets cut off, and the model answers half an utterance. Unset takes the
+server default of 700 ms. Values are clamped to 200–5000, and the applied value
+is echoed back — check `conn.effective_config` rather than assuming.
+
+For full control, leave this high as a backstop and call `conn.commit()` from
+your own endpointing instead (see **Turn-taking** below).
+
+**`decode_every_ms` — Interim-result cadence**
 
 ```python
-# Quick segmentation — short pauses trigger a new segment
-conn = await client.asr.stream(config=StreamingConfig(silence_threshold_sec=0.3))
-# Good for: fast-paced dialogue, command recognition
+# More frequent partials (default 640 ms)
+conn = await client.asr.stream(config=StreamingConfig(decode_every_ms=400))
 
-# Patient segmentation — only split on longer pauses
-conn = await client.asr.stream(config=StreamingConfig(silence_threshold_sec=1.5))
-# Good for: lectures, monologues, dictation
+# Fewer partials: lower GPU cost per stream, coarser interim text
+conn = await client.asr.stream(config=StreamingConfig(decode_every_ms=1280))
 ```
+
+A stream re-decodes its whole buffer on each tick, so this is the main control
+over what one connection costs to serve. It does not affect how quickly a
+`final` arrives.
+
+**`vad` — Endpointing detector**
+
+```python
+conn = await client.asr.stream(config=StreamingConfig(language="en", vad="silero"))
+```
+
+Worth setting on telephony audio. Energy-based endpointing can fail to register
+silence at all on a noisy line, and then natural endpointing never fires and the
+segment runs to its maximum length instead.
+
+**`chunk_size_sec` and `silence_threshold_sec` — inert**
+
+These came from the older gateway and are ignored by `/v1/realtime`. They are
+still accepted so existing code keeps working, but setting them changes nothing.
+Use `endpoint_silence_ms` and `decode_every_ms` above.
 
 #### Streaming Events
 
@@ -829,13 +865,13 @@ conn = await client.asr.stream(config=StreamingConfig(language="en"))
 def on_partial(msg):
     print(f"Interim: {msg.text}")
 
-@conn.on(StreamingMessageType.FINAL_SEGMENT)
-def on_segment(msg):
-    print(f"Segment: {msg.text}")
-
 @conn.on(StreamingMessageType.FINAL)
 def on_final(msg):
-    print(f"Final: {msg.text} ({msg.audio_duration_sec}s)")
+    print(f"Final: {msg.text} (turn over: {msg.end_of_utterance})")
+
+@conn.on(StreamingMessageType.UTTERANCE_END)
+def on_utterance_end(msg):
+    print("Speaker finished — your turn")
 
 @conn.on(StreamingMessageType.DONE)
 def on_done(msg):
@@ -846,22 +882,56 @@ def on_error(msg):
     print(f"Error: {msg.message}")
 ```
 
-| Event           | Model                   | Key Attributes                                                |
-| --------------- | ----------------------- | ------------------------------------------------------------- |
-| `PARTIAL`       | `StreamingPartial`      | `text`, `language`, `segment_id`, `latency_ms`                |
-| `FINAL_SEGMENT` | `StreamingFinalSegment` | `text`, `language`, `segment_id`, `silence_duration_ms`       |
-| `FINAL`         | `StreamingFinal`        | `text`, `language`, `audio_duration_sec`, `inference_time_ms` |
-| `DONE`          | `StreamingDone`         | `total_segments`, `total_audio_duration_sec`                  |
-| `ERROR`         | `StreamingError`        | `message`, `code`                                             |
+| Event            | Model                     | Key Attributes                                       |
+| ---------------- | ------------------------- | ---------------------------------------------------- |
+| `PARTIAL`        | `StreamingPartial`        | `text`, `delta`, `language`, `segment_id`            |
+| `FINAL`          | `StreamingFinal`          | `text`, `end_of_utterance`, `language`, `segment_id` |
+| `FINAL_REFINED`  | `StreamingFinal`          | `text` — code-switch re-render, if opted in          |
+| `UTTERANCE_END`  | `StreamingUtteranceEnd`   | `segment_id` — the turn-end signal                   |
+| `DONE`           | `StreamingDone`           | `total_segments`, `total_audio_duration_sec`         |
+| `ERROR`          | `StreamingError`          | `message`, `code`                                    |
+
+`FINAL_SEGMENT` belonged to the older gateway. `/v1/realtime` never sends it, so
+a handler registered on it will not fire — use `FINAL`.
+
+#### Turn-taking
+
+A `final` alone does not mean the speaker is done: it also fires when the server
+reaches its maximum segment length and cuts mid-speech. The two cases are
+distinguished by `end_of_utterance`, and only a genuine stop is followed by
+`UTTERANCE_END`. Drive turn-taking from that event.
+
+Note the corollary: a speaker who never pauses produces no `UTTERANCE_END` at
+all. If your agent must respond regardless, pair it with your own timeout.
+
+```python
+@conn.on(StreamingMessageType.UTTERANCE_END)
+def on_utterance_end(msg):
+    start_replying()
+```
+
+To decide turn boundaries yourself — from a VAD, a push-to-talk release, or a
+semantic detector — call `commit()`. The gateway finalises immediately and keeps
+the socket open:
+
+```python
+await conn.commit()   # finalise now, session stays open
+```
+
+Use `commit()` rather than `end()` between turns. `end()` closes the session, so
+calling it per turn means a fresh WebSocket — and a fresh TCP+TLS handshake,
+measured at ~300 ms from India, against an ASR that finalises in 39 ms.
 
 #### Streaming Connection Methods
 
 ```python
 await conn.send_audio(pcm_bytes)   # Send raw PCM audio
-await conn.end()                    # Signal end of audio stream
-await conn.close()                  # Close WebSocket connection
+await conn.commit()                 # Finalise this turn, keep the session open
+await conn.end()                    # Finalise and END the session
+await conn.close()                  # Close the WebSocket
 conn.is_closed                      # Check connection status
 conn.session_id                     # Server-assigned session ID
+conn.effective_config               # Tuning values the server actually applied
 ```
 
 #### `TranscriptionResult`

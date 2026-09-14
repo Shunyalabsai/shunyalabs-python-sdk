@@ -11,7 +11,7 @@ import json
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 
 # ---------------------------------------------------------------------------
@@ -147,17 +147,57 @@ class StreamingConfig(BaseModel):
     agent the language is nearly always known up front, and passing it removes an
     avoidable source of wrong-script transcripts on the first turns of a call.
 
+    **Turn-latency tuning lives in** ``endpoint_silence_ms``. It is the single
+    biggest lever on how long a caller waits after they stop speaking, because it
+    is pure wall-clock delay before the server will emit a final. Leave it unset
+    to take the server default (700 ms), lower it for snappier turns, raise it if
+    callers who pause mid-sentence are being cut off. A deployment that ran it at
+    3000 measured 3.05 s of perceived turn latency from this setting alone.
+
     ``dtype``, ``chunk_size_sec`` and ``silence_threshold_sec`` are carried over from
-    the older gateway and are ignored by ``/v1/realtime``, which endpoints on its own
-    VAD. They are kept so existing callers do not break, but setting them changes
-    nothing -- do not reach for them to tune latency.
+    the older gateway and are ignored by ``/v1/realtime``. They are kept so existing
+    callers do not break, but setting them changes nothing -- use
+    ``endpoint_silence_ms`` / ``decode_every_ms`` / ``vad`` instead.
+
+    Unknown fields are rejected rather than silently dropped: a mistyped tuning
+    knob that quietly did nothing is the failure this class is most prone to.
     """
+
+    model_config = ConfigDict(extra="forbid")
 
     language: str = "auto"
     sample_rate: int = 16000
     dtype: str = "int16"
     chunk_size_sec: float = 1.0
     silence_threshold_sec: float = 0.5
+
+    # -- Live tuning (``/v1/realtime``). None => server default. ------------
+    # Each is echoed back in the ``ready`` frame after server-side clamping, and
+    # surfaced on the connection as ``ASRStreamingConnection.effective_config``,
+    # so a clamped value is visible instead of silently different.
+
+    #: Silence before the server emits a final, in ms. Server clamps to 200-5000
+    #: (default 700). The primary perceived-latency control.
+    endpoint_silence_ms: Optional[int] = None
+
+    #: How often interim results are produced, in ms. Server clamps to 320-5000
+    #: (default 640). The stream re-decodes its whole buffer each tick, so raising
+    #: this cuts GPU cost per stream at the price of coarser partials.
+    decode_every_ms: Optional[int] = None
+
+    #: Endpointing detector. ``"silero"`` opts into model-based VAD, which is
+    #: worth it on noisy telephony audio where plain energy thresholding can fail
+    #: to register silence at all -- and then never endpoints naturally.
+    vad: Optional[str] = None
+
+    #: Opt into code-switch refinement: a ``final`` is followed by a
+    #: ``final_refined`` carrying the same segment re-rendered in correct scripts.
+    #: Subscribe to :attr:`StreamingMessageType.FINAL_REFINED` or it is discarded.
+    codeswitch: Optional[bool] = None
+
+    #: Explicit model/tier selection. Leave unset to let the gateway route on
+    #: language.
+    model: Optional[str] = None
 
     def to_ws_payload(self) -> Dict[str, Any]:
         """Return the dict to serialise as the WebSocket config frame.
@@ -177,6 +217,13 @@ class StreamingMessageType(str, Enum):
     # re-rendered in correct scripts. It arrives separately so a raw final is never delayed
     # waiting for it. Subscribe to it or the refinement is silently discarded.
     FINAL_REFINED = "final_refined"
+    # The turn-end signal. Emitted immediately after a `final` whose
+    # `end_of_utterance` is true -- i.e. the speaker genuinely stopped, as opposed
+    # to the server hitting its maximum segment length and cutting mid-speech.
+    # This is the event to drive turn-taking from in a voice agent; a `final` alone
+    # does not distinguish the two cases. No `utterance_end` arrives for a forced
+    # cut, so a caller who never pauses can starve it -- handle that explicitly.
+    UTTERANCE_END = "utterance_end"
     ERROR = "error"
     # Older gateway only -- /v1/realtime never sends these. Kept so existing subscriptions
     # keep importing, but a handler registered on them will never fire.
@@ -185,14 +232,37 @@ class StreamingMessageType(str, Enum):
 
 
 class StreamingPartial(BaseModel):
-    """Interim transcription result received during streaming."""
+    """Interim transcription result received during streaming.
+
+    ``/v1/realtime`` sends ``seg`` and ``elapsed_ms``; the older gateway sent
+    ``segment_id`` and ``latency_ms``. Both spellings populate the same field, so
+    code written against either name keeps working.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     type: str = StreamingMessageType.PARTIAL
     text: str = ""
     language: Optional[str] = None
-    segment_id: Optional[int] = None
+    segment_id: Optional[int] = Field(
+        default=None, validation_alias=AliasChoices("seg", "segment_id")
+    )
+    latency_ms: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("elapsed_ms", "latency_ms")
+    )
+    #: Text added since the previous partial. ``/v1/realtime`` only.
+    delta: str = ""
     audio_duration_sec: Optional[float] = None
-    latency_ms: Optional[float] = None
+
+    @property
+    def seg(self) -> Optional[int]:
+        """Wire-name alias for :attr:`segment_id`."""
+        return self.segment_id
+
+    @property
+    def elapsed_ms(self) -> Optional[float]:
+        """Wire-name alias for :attr:`latency_ms`."""
+        return self.latency_ms
 
 
 class StreamingFinalSegment(BaseModel):
@@ -207,15 +277,64 @@ class StreamingFinalSegment(BaseModel):
 
 
 class StreamingFinal(BaseModel):
-    """Final transcription result for the entire stream."""
+    """A finalised segment.
+
+    On ``/v1/realtime`` this arrives per utterance, not once per connection: the
+    socket stays open and the next utterance starts a new segment.
+
+    :attr:`end_of_utterance` is the field that matters for turn-taking. ``True``
+    means the speaker actually stopped; ``False`` means the server hit its maximum
+    segment length and cut mid-speech, so the turn is *not* over. A
+    :attr:`StreamingMessageType.UTTERANCE_END` event follows only in the ``True``
+    case.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
 
     type: str = StreamingMessageType.FINAL
     text: str = ""
     language: Optional[str] = None
-    segment_id: Optional[int] = None
+    segment_id: Optional[int] = Field(
+        default=None, validation_alias=AliasChoices("seg", "segment_id")
+    )
+    #: True if the speaker stopped; False if this was a forced maximum-length cut.
+    end_of_utterance: Optional[bool] = None
+    inference_time_ms: Optional[float] = Field(
+        default=None, validation_alias=AliasChoices("elapsed_ms", "inference_time_ms")
+    )
     audio_duration_sec: Optional[float] = None
-    inference_time_ms: Optional[float] = None
     connection_duration_sec: Optional[float] = None
+
+    @property
+    def seg(self) -> Optional[int]:
+        """Wire-name alias for :attr:`segment_id`."""
+        return self.segment_id
+
+    @property
+    def elapsed_ms(self) -> Optional[float]:
+        """Wire-name alias for :attr:`inference_time_ms`."""
+        return self.inference_time_ms
+
+
+class StreamingUtteranceEnd(BaseModel):
+    """The speaker finished their turn.
+
+    Emitted right after a :class:`StreamingFinal` whose ``end_of_utterance`` is
+    true. Drive turn-taking from this rather than from ``final``, which also fires
+    for forced mid-speech cuts.
+    """
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    type: str = StreamingMessageType.UTTERANCE_END
+    segment_id: Optional[int] = Field(
+        default=None, validation_alias=AliasChoices("seg", "segment_id")
+    )
+
+    @property
+    def seg(self) -> Optional[int]:
+        """Wire-name alias for :attr:`segment_id`."""
+        return self.segment_id
 
 
 class StreamingDone(BaseModel):
@@ -243,6 +362,12 @@ _STREAMING_MESSAGE_MAP: Dict[str, type[BaseModel]] = {
     StreamingMessageType.PARTIAL: StreamingPartial,
     StreamingMessageType.FINAL_SEGMENT: StreamingFinalSegment,
     StreamingMessageType.FINAL: StreamingFinal,
+    # final_refined carries the same shape as a final. Its absence here meant
+    # parse_streaming_message fell through to the unknown-type branch and handed
+    # subscribers a StreamingError, which has no `.text` -- so the refinement was
+    # unusable even after 1.0.1 started subscribing to it.
+    StreamingMessageType.FINAL_REFINED: StreamingFinal,
+    StreamingMessageType.UTTERANCE_END: StreamingUtteranceEnd,
     StreamingMessageType.DONE: StreamingDone,
     StreamingMessageType.ERROR: StreamingError,
 }
@@ -274,6 +399,7 @@ __all__ = [
     "StreamingPartial",
     "StreamingFinalSegment",
     "StreamingFinal",
+    "StreamingUtteranceEnd",
     "StreamingDone",
     "StreamingError",
     # Helpers

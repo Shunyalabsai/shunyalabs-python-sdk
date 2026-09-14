@@ -2,6 +2,128 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [shunyalabsai 1.1.0 · pipecat-shunyalabsai 1.1.0 · livekit-plugins-shunyalabsai 1.1.0] - 2026-09-14
+
+A latency release. `/v1/realtime` grew per-connection tuning and a turn-end
+signal some time ago; the SDK had no way to reach any of it, so every consumer
+was running server defaults and doing its own turn detection. This closes that
+gap.
+
+**The short version for a voice agent:** set `endpoint_silence_ms`, drive turns
+from `utterance_end`, finalise with `commit()` instead of `end()`, and pass a
+lower `min_buffer_frames` if your transport is not WebRTC.
+
+**`pipecat-shunyalabsai` 1.1.0 and `livekit-plugins-shunyalabsai` 1.1.0 require
+`shunyalabsai>=1.1.0`** — both use config fields and a message type that older
+cores do not define.
+
+### Added — core (`shunyalabsai` 1.1.0)
+
+- **`StreamingConfig` live tuning.** `endpoint_silence_ms`, `decode_every_ms`,
+  `vad`, `codeswitch` and `model`. `endpoint_silence_ms` is the one that matters
+  most: it is pure wall-clock delay after the speaker stops, before a `final` can
+  be emitted. Unset fields are omitted from the wire so server defaults apply.
+- **`StreamingMessageType.UTTERANCE_END`** and `StreamingUtteranceEnd`. The
+  turn-end signal, emitted after a `final` whose `end_of_utterance` is true.
+  Previously this event arrived, failed to match the enum, and was logged as
+  `Unknown streaming message type: utterance_end` on every turn.
+- **`StreamingFinal.end_of_utterance`.** Distinguishes a real endpoint from the
+  server hitting its maximum segment length and cutting mid-speech. A `final`
+  alone does not tell you the turn is over.
+- **`ASRStreamingConnection.commit()`** (and `flush()`, an alias). Finalises the
+  current utterance and **keeps the socket open**. `end()` finalises and closes,
+  so using it per turn costs a TCP+TLS handshake every turn — measured at ~300 ms
+  from India, against an ASR that finalises in 39 ms.
+- **`ASRStreamingConnection.effective_config`.** The tuning values from the
+  server's `ready` frame, after clamping. Out-of-range requests are clamped
+  silently, not rejected, so this is how you confirm what took effect.
+- **`reset_token_cache()`** for tests and credential rotation.
+
+### Changed — core
+
+- **Token state is now shared per credential, not per instance.** A pipeline
+  builds one service object per stream, so 50 concurrent calls used to mean 100
+  mint requests, all on the critical path of call setup. Now one mint per
+  credential, refreshed once for everyone. The `TokenAuth` API is unchanged.
+- **`StreamingConfig` rejects unknown fields.** Pydantic's default silently
+  dropped them, which is the worst possible behaviour for a tuning knob: the
+  setting appears applied and is not. `StreamingConfig(endpoint_silence=250)`
+  now raises instead of doing nothing. Nothing in the documented surface changes.
+
+### Fixed — core
+
+- **`final_refined` was unusable.** It was missing from the message map, so it
+  fell through to the unknown-type branch and subscribers received a
+  `StreamingError` — which has no `.text`. 1.0.1 started subscribing to this
+  event but could not read it.
+- **Streaming result fields were never populated.** `/v1/realtime` sends `seg`,
+  `delta` and `elapsed_ms`; the models declared `segment_id`, `latency_ms` and
+  `inference_time_ms`, so in practice only `text` ever arrived. Both spellings
+  now populate the same field, and `delta` is exposed.
+- **`__version__` said 1.0.0 in all three packages** while the distributions said
+  1.0.1. That string is reported to the gateway as `sm-sdk`, so our own telemetry
+  attributed traffic to the wrong version. Now asserted by a test.
+
+### Added — Pipecat plugin (`pipecat-shunyalabsai` 1.1.0)
+
+- **Turn frames.** `utterance_end` becomes `UserStoppedSpeakingFrame`, and the
+  first partial of an utterance becomes `UserStartedSpeakingFrame`. The service
+  previously emitted neither, so turn detection fell entirely to a transport VAD
+  guessing from the same audio. Pair with pipecat's `ExternalUserTurnStrategies`
+  to let the ASR own the decision. Opt out with `emit_turn_frames=False`.
+  The start frame is only as prompt as `decode_every_ms`, so keep a transport VAD
+  for barge-in, which needs to be faster than turn-taking does.
+- **`ShunyalabsSTTService.commit()`** — force a turn boundary from your own
+  endpointing.
+- **STT tuning arguments**: `endpoint_silence_ms`, `decode_every_ms`, `vad`,
+  `codeswitch`, `model`. A clamped value is logged rather than left to be
+  discovered as "the ASR is slow".
+- **TTS arguments** `quality`, `clause_first`, `min_buffer_frames`, `frame_ms`.
+  `quality="low"` roughly halves synthesis time but drops a word in a measurable
+  fraction of short clips — fine for acknowledgements, not for reading out a
+  number or a reference code. It is a session setting, not per utterance.
+- **`ShunyalabsTTSService.discard_current_turn()`** — stop the bot mid-utterance
+  without waiting for an interruption frame to propagate.
+
+### Changed — Pipecat plugin
+
+- **`min_send_bytes` default 4096 → 3200** (256 ms → 100 ms at 16 kHz). The old
+  value rested on the gateway needing ~4 KB blocks for its VAD; the opposite is
+  true. The server takes one silence reading per frame it is fed, so larger
+  frames give it *coarser* resolution — which is why it defensively chops
+  anything over ~1 s into 100 ms sub-frames. Every buffered byte was latency in
+  front of an ASR that finalises in 39 ms.
+- **Barge-in no longer reconnects.** It now sends `{"type": "cancel"}` and drains
+  to the server's `cancelled` acknowledgement, leaving the session reusable.
+  Previously it dropped the socket — always correct, but it paid a full TCP+TLS
+  dial and `ready` handshake on the next turn, precisely while the caller was
+  waiting to be answered. Falls back to the old behaviour if the fast path is not
+  safe, so recovery is never worse than before.
+- `MIN_BUFFER_FRAMES` and `FRAME_MS` are now instance settings. **Defaults are
+  unchanged**: the 480 ms pre-buffer is sized for WebRTC, where an encoder
+  starves audibly, and Daily and LiveKit users should keep it.
+
+### Fixed — Pipecat plugin
+
+- Removed the `final_segment` handler, which could never fire on
+  `/v1/realtime`, and corrected the docstrings and README table that described
+  it as the source of `TranscriptionFrame`.
+- A reconnect mid-utterance no longer strands the speaking latch, which would
+  otherwise have suppressed every subsequent turn-start frame for the life of the
+  pipeline.
+
+### Fixed — LiveKit plugin (`livekit-plugins-shunyalabsai` 1.1.0)
+
+- **`END_OF_SPEECH` was never emitted.** Its only emission sat inside the
+  `final_segment` handler, which `/v1/realtime` never triggers — so this plugin
+  produced no end-of-speech event at all on the current gateway. It now comes
+  from `utterance_end`.
+- `final_refined` is now delivered as a final transcript instead of being
+  dropped.
+- Added the same STT tuning arguments as the Pipecat plugin. `STT.model` now
+  reflects an explicitly configured model rather than always reporting
+  `vak-v3`.
+
 ## [shunyalabsai 1.0.1 · pipecat-shunyalabsai 1.0.1 · livekit-plugins-shunyalabsai 1.0.1] - 2026-09-08
 
 A correctness fix in the Pipecat plugin, plus documentation that stops three settings

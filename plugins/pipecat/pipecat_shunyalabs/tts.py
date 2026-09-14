@@ -73,7 +73,18 @@ FRAME_MS = 40
 
 # 12 × 40 ms = 480 ms pre-buffer. Bounds the worst observed server-side chunk
 # gap (~280 ms) with headroom for WebRTC encoder and scheduler jitter.
+#
+# This default is sized for WebRTC (Daily, LiveKit), where an encoder starves
+# audibly. Transports without an encoder -- a raw telephony WebSocket, where the
+# carrier holds its own playback buffer -- can run far lower, and 480 ms is a
+# large share of the first-audio budget on a phone call. Both are now
+# constructor arguments (`min_buffer_frames`, `frame_ms`); the defaults are
+# unchanged so existing WebRTC pipelines behave exactly as before.
 MIN_BUFFER_FRAMES = 12
+
+# How long to wait for the server's `cancelled` acknowledgement on barge-in
+# before giving up and dropping the socket instead.
+_CANCEL_ACK_TIMEOUT_S = 1.0
 
 _SUPPORTS_CONTEXT = (
     "context_id" in inspect.signature(TTSStartedFrame.__init__).parameters
@@ -81,6 +92,55 @@ _SUPPORTS_CONTEXT = (
 
 
 class ShunyalabsTTSService(TTSService):
+    """Pipecat TTS service backed by the Shunyalabs ``/v1/realtime`` gateway.
+
+    Holds one persistent WebSocket across turns, paces audio out at ~realtime,
+    and recovers from barge-in without reconnecting.
+
+    **Latency knobs, in the order they are worth reaching for:**
+
+    ``min_buffer_frames``
+        Frames to accumulate before releasing the first audio of a session.
+        Defaults to 12 (480 ms at the default ``frame_ms``), sized for WebRTC
+        transports where an encoder starves audibly. A telephony WebSocket has no
+        encoder and the carrier buffers for you, so 3 (120 ms) is usually safe
+        there -- but measure, because an underrun is audible too.
+
+    ``clause_first``
+        Release the first piece on a clause boundary instead of waiting for the
+        opening sentence to terminate. Cuts first-audio noticeably on long
+        replies and does nothing for short ones. Off by default: splitting a
+        sentence means synthesising it in two pieces, which can be audible at the
+        join, so it is your call rather than ours.
+
+    ``quality``
+        ``"low"`` | ``"medium"`` | ``"high"``. ``"low"`` roughly halves the
+        diffusion work and is the single biggest lever on first-audio -- but it
+        drops a word in a measurable fraction of short clips, so it does not
+        belong anywhere a number, date or reference code is being read out.
+        Sensible for throwaway acknowledgements, not for content.
+
+        Note this is a **session** setting, not per utterance: the gateway reads
+        it from the init frame. Mixing qualities in one call means two service
+        instances, one per quality.
+
+    Args:
+        api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY``.
+        url: WebSocket endpoint URL.
+        model: TTS model (default ``"zero-indic"``).
+        voice: Voice name (default ``"Rajesh"``).
+        style: Optional style tag, prepended to each utterance's text.
+        language: Language code (default ``"en"``).
+        sample_rate: Overridden by whatever the server reports in ``ready``.
+        output_format: Accepted for API compatibility; inert on the realtime path.
+        speed: Accepted for API compatibility; inert on the realtime path.
+        quality: See above. ``None`` takes the server default (medium).
+        clause_first: See above. ``None`` takes the server default (off).
+        min_buffer_frames: See above.
+        frame_ms: Size of each emitted audio frame, in ms (default 40).
+        **kwargs: Forwarded to ``TTSService.__init__``.
+    """
+
     def __init__(
         self,
         *,
@@ -93,6 +153,10 @@ class ShunyalabsTTSService(TTSService):
         sample_rate: Optional[int] = None,
         output_format: str = "pcm",
         speed: float = 1.0,
+        quality: Optional[str] = None,
+        clause_first: Optional[bool] = None,
+        min_buffer_frames: int = MIN_BUFFER_FRAMES,
+        frame_ms: int = FRAME_MS,
         **kwargs,
     ) -> None:
         if _TTSSettings is not None:
@@ -116,6 +180,10 @@ class ShunyalabsTTSService(TTSService):
         self._language = language
         self._output_format = output_format
         self._speed = speed
+        self._quality = quality
+        self._clause_first = clause_first
+        self._min_buffer_frames = int(min_buffer_frames)
+        self._frame_ms = int(frame_ms)
 
         # ASR/TTS v2 services accept only a minted short-lived JWT, never the raw
         # key. TokenAuth mints and refreshes it transparently.
@@ -131,7 +199,7 @@ class ShunyalabsTTSService(TTSService):
         self._pace_started: bool = False
 
     def _frame_bytes(self) -> int:
-        return int(self.sample_rate * (FRAME_MS / 1000) * BYTES_PER_SAMPLE * CHANNELS)
+        return int(self.sample_rate * (self._frame_ms / 1000) * BYTES_PER_SAMPLE * CHANNELS)
 
     def _format_text(self, text: str) -> str:
         return f"{self._style} {text}" if self._style else text
@@ -163,9 +231,15 @@ class ShunyalabsTTSService(TTSService):
         self._transport = await self._open_transport()
         # /v1/realtime handshake: the FIRST frame is a JSON init object; the server replies with
         # {"type":"ready","sample_rate":...}. The session then stays open for many text/flush turns.
-        await self._transport.send_message(
-            {"voice": self._voice, "language": self._language, "model": self._model}
-        )
+        init = {"voice": self._voice, "language": self._language, "model": self._model}
+        # Both are session-level on the service, so they go in the init frame and
+        # apply for the life of the socket. Omitted when unset so the server's own
+        # defaults apply.
+        if self._quality is not None:
+            init["quality"] = self._quality
+        if self._clause_first is not None:
+            init["clause_first"] = self._clause_first
+        await self._transport.send_message(init)
         ready = await asyncio.wait_for(self._transport.receive_message(), timeout=15.0)
         if not isinstance(ready, dict) or ready.get("type") != "ready":
             if isinstance(ready, dict) and ready.get("type") == "error":
@@ -222,20 +296,92 @@ class ShunyalabsTTSService(TTSService):
         await super().cancel(frame)
 
     async def _handle_interruption(self, frame: InterruptionFrame, direction: FrameDirection):
-        """Barge-in: reset the socket so the interrupted synthesis' remaining
-        audio and its ``done`` cannot leak into the next turn.
+        """Barge-in: discard the interrupted synthesis but keep the session.
 
-        A ``TTSService`` interruption cancels the in-flight ``run_tts`` generator
-        mid-stream, leaving unread binary/``done`` frames buffered on the shared
-        socket. Reusing that socket would desync the next turn (it would read the
-        stale ``done`` and stop early). Dropping the socket is the simplest
-        guaranteed-clean recovery — the next ``run_tts`` transparently rebuilds
-        it, and the reconnect overlaps the natural STT+LLM gap before the bot
-        speaks again. The v2 service stops generating as soon as the socket
-        closes, so no extra ``cancel`` message is required.
+        An interruption cancels the in-flight ``run_tts`` generator mid-stream,
+        leaving unread binary and ``done`` frames buffered on the shared socket.
+        Reusing it blindly would desync the next turn -- it would read the stale
+        ``done`` and stop early.
+
+        Previously this dropped the socket, which is always correct but costs a
+        full reconnect: TCP+TLS, a fresh ``ready`` handshake, and re-paying the
+        pre-buffer on the next turn. On a barge-in-heavy call that is the most
+        expensive thing the service does, and it lands exactly when the user is
+        waiting to be answered.
+
+        The protocol already has the right primitive: ``{"type": "cancel"}``
+        discards buffered text and in-flight audio, and the server acknowledges
+        with ``cancelled`` after bumping its generation counter -- so anything
+        from the interrupted turn is suppressed at the source rather than left
+        for us to untangle. Draining up to that ack leaves the socket clean and
+        reusable.
+
+        Falls back to the old drop-the-socket behaviour whenever the fast path
+        cannot be taken safely -- notably if ``run_tts`` still holds the
+        transport lock, since two concurrent readers on one socket would be worse
+        than a reconnect.
         """
         await super()._handle_interruption(frame, direction)
-        await self._close_transport()
+        await self.discard_current_turn()
+
+    async def discard_current_turn(self) -> None:
+        """Throw away the in-flight utterance, keeping the session if possible.
+
+        Called on barge-in. Public because the same operation is useful directly:
+        a caller that detects an interruption before pipecat does (its own VAD on
+        the inbound leg, say) can stop the bot talking without waiting for the
+        frame to propagate.
+
+        Never raises -- any uncertainty about socket state ends in a clean
+        reconnect instead.
+        """
+        transport = self._transport
+        if transport is None or not self._session_ready:
+            await self._close_transport()
+            return
+
+        # Do not read from the socket while run_tts may still be reading it.
+        try:
+            await asyncio.wait_for(
+                self._transport_lock.acquire(), timeout=_CANCEL_ACK_TIMEOUT_S
+            )
+        except Exception:  # noqa: BLE001 - includes the acquire timeout
+            await self._close_transport()
+            return
+
+        try:
+            await transport.send_message({"type": "cancel"})
+            deadline = time.monotonic() + _CANCEL_ACK_TIMEOUT_S
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError
+                msg = await asyncio.wait_for(
+                    transport.receive_message(), timeout=remaining
+                )
+                # Everything still arriving belongs to the interrupted turn:
+                # trailing PCM, and its `speaking`/`done`. Drop it all.
+                if isinstance(msg, dict) and msg.get("type") == "cancelled":
+                    break
+        except Exception:  # noqa: BLE001 - any doubt about socket state -> rebuild
+            self._transport_lock.release()
+            await self._close_transport()
+            return
+
+        # Session is clean and stays open. Pacing still resets: the buffered PCM
+        # belongs to the interrupted utterance and must not be spoken, and
+        # `_pace_next_time` has to be cleared alongside `_pace_started` or the
+        # pacing loop compares None to a timestamp.
+        #
+        # So the next turn re-pays the pre-buffer but NOT the reconnect. That is
+        # the expensive half: a TCP+TLS dial plus a fresh `ready` handshake to a
+        # remote endpoint, all of it while the caller waits. Pair this with a
+        # lower `min_buffer_frames` on transports that do not need 480 ms and
+        # barge-in recovery costs almost nothing.
+        self._pace_buffer = bytearray()
+        self._pace_next_time = None
+        self._pace_started = False
+        self._transport_lock.release()
 
     async def run_tts(
         self, text: str, context_id: Optional[str] = None
@@ -275,7 +421,7 @@ class ShunyalabsTTSService(TTSService):
                     frame_bytes = self._frame_bytes()
                     self._pace_buffer.extend(msg)
                     if not self._pace_started:
-                        if len(self._pace_buffer) < frame_bytes * MIN_BUFFER_FRAMES:
+                        if len(self._pace_buffer) < frame_bytes * self._min_buffer_frames:
                             continue
                         self._pace_started = True
                         self._pace_next_time = time.monotonic()
@@ -288,7 +434,7 @@ class ShunyalabsTTSService(TTSService):
                         chunk = bytes(self._pace_buffer[:frame_bytes])
                         del self._pace_buffer[:frame_bytes]
                         yield self._build_audio_frame(chunk, context_id)
-                        self._pace_next_time += FRAME_MS / 1000
+                        self._pace_next_time += self._frame_ms / 1000
                     continue
 
                 if not isinstance(msg, dict):

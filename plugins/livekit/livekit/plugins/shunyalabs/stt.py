@@ -70,6 +70,19 @@ class STT(stt.STT):
         language: BCP-47 language tag or ``"auto"`` for auto-detection.
         api_url: REST endpoint base URL.
         ws_url: WebSocket streaming endpoint URL.
+        endpoint_silence_ms: Silence before the gateway emits a final, and so the
+            dominant control over how long a speaker waits after finishing.
+            ``None`` takes the server default (700 ms); clamped to 200-5000.
+        decode_every_ms: Interim-result cadence. ``None`` takes the server
+            default (640 ms); clamped to 320-5000. Raising it lowers per-stream
+            GPU cost at the price of coarser interim transcripts.
+        vad: ``"silero"`` to opt into model-based endpointing. Worth it on noisy
+            telephony audio, where energy thresholding can fail to register
+            silence at all and natural endpointing then never fires.
+        codeswitch: Opt into code-switch refinement, delivered as an additional
+            final transcript once the segment has been re-rendered in the correct
+            scripts.
+        model: Explicit model/tier. ``None`` lets the gateway route on language.
     """
 
     def __init__(
@@ -79,6 +92,11 @@ class STT(stt.STT):
         language: str = "auto",
         api_url: Optional[str] = None,
         ws_url: Optional[str] = None,
+        endpoint_silence_ms: Optional[int] = None,
+        decode_every_ms: Optional[int] = None,
+        vad: Optional[str] = None,
+        codeswitch: Optional[bool] = None,
+        model: Optional[str] = None,
     ) -> None:
         super().__init__(
             capabilities=STTCapabilities(
@@ -110,10 +128,15 @@ class STT(stt.STT):
         self._ws_url = resolve_endpoint(arg=ws_url, server=None,
                                         env_var="SHUNYALABS_ASR_WS_URL", default=_DEFAULT_WS_URL)
         self._auth = TokenAuth(self._api_key)
+        self._endpoint_silence_ms = endpoint_silence_ms
+        self._decode_every_ms = decode_every_ms
+        self._vad = vad
+        self._codeswitch = codeswitch
+        self._model = model
 
     @property
     def model(self) -> str:
-        return "vak-v3"
+        return self._model or "vak-v3"
 
     @property
     def provider(self) -> str:
@@ -226,9 +249,28 @@ class STTStream(RecognizeStream):
             language=self._language,
             sample_rate=16000,
             dtype="int16",
+            endpoint_silence_ms=self._stt._endpoint_silence_ms,
+            decode_every_ms=self._stt._decode_every_ms,
+            vad=self._stt._vad,
+            codeswitch=self._stt._codeswitch,
+            model=self._stt._model,
         )
 
         conn = await streaming.stream(config=config)
+
+        # The gateway clamps these and echoes the applied values; a silently
+        # clamped latency setting otherwise gets diagnosed as "the ASR is slow".
+        applied = conn.effective_config
+        for _name, _requested in (
+            ("endpoint_silence_ms", self._stt._endpoint_silence_ms),
+            ("decode_every_ms", self._stt._decode_every_ms),
+        ):
+            _got = applied.get(_name)
+            if _requested is not None and _got is not None and int(_got) != int(_requested):
+                logger.warning(
+                    "Shunyalabs STT: %s=%s was clamped to %s by the gateway.",
+                    _name, _requested, _got,
+                )
 
         try:
             # Register event handlers that push to LiveKit's event channel
@@ -245,8 +287,26 @@ class STTStream(RecognizeStream):
                         )
                     )
 
-            @conn.on(StreamingMessageType.FINAL_SEGMENT)
-            def on_final_segment(msg):
+            # NOTE: FINAL_SEGMENT is not handled. /v1/realtime never sends it --
+            # it belonged to the older gateway. END_OF_SPEECH used to be emitted
+            # only from inside that handler, which meant this plugin produced no
+            # end-of-speech event at all on the current gateway. It now comes from
+            # UTTERANCE_END below, which is the real signal.
+
+            @conn.on(StreamingMessageType.UTTERANCE_END)
+            def on_utterance_end(msg):
+                # Fires only after a final whose end_of_utterance is true, so it
+                # marks a genuine turn boundary rather than a forced
+                # maximum-length cut.
+                self._event_ch.send_nowait(
+                    SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
+                )
+
+            @conn.on(StreamingMessageType.FINAL_REFINED)
+            def on_final_refined(msg):
+                # Code-switch refinement of a segment already delivered as FINAL,
+                # re-rendered in the correct scripts. Delivered as its own
+                # transcript rather than dropped.
                 if msg.text:
                     self._event_ch.send_nowait(
                         SpeechEvent(
@@ -257,9 +317,6 @@ class STTStream(RecognizeStream):
                                 confidence=1.0,
                             )],
                         )
-                    )
-                    self._event_ch.send_nowait(
-                        SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
                     )
 
             @conn.on(StreamingMessageType.FINAL)

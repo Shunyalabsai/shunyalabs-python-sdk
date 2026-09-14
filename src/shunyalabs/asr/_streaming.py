@@ -5,11 +5,20 @@ The streaming protocol works as follows:
 1. Connect to the WebSocket endpoint (``/v1/realtime``).
 2. Send a JSON configuration frame containing language, sample rate, etc.
    The ``api_key`` is injected automatically from :class:`StaticKeyAuth`.
-3. Receive a ``{"type": "ready", "session_id": "..."}`` acknowledgement.
+3. Receive a ``{"type": "ready", "session_id": "..."}`` acknowledgement, which
+   also echoes the server-clamped tuning values (see
+   :attr:`ASRStreamingConnection.effective_config`).
 4. Send raw binary PCM audio chunks.
-5. Send the text message ``"END"`` to signal the end of the audio stream.
-6. Continue receiving ``partial``, ``final_segment``, ``final``, and
-   ``done`` messages until the server closes the connection.
+5. Per turn, call :meth:`ASRStreamingConnection.commit` to finalise the current
+   utterance and keep the socket open. Events: ``partial`` while speech is in
+   progress, then ``final``, then ``utterance_end`` if the speaker genuinely
+   stopped.
+6. Call :meth:`ASRStreamingConnection.end` once, at the end of the whole stream;
+   it sends ``"end"`` and waits for ``done``.
+
+A voice agent should drive turns with ``commit`` and call ``end`` only when the
+call is over. Using ``end`` per turn forces a new WebSocket -- and therefore a
+new TCP+TLS handshake -- for every turn.
 
 The SDK exposes two user-facing classes:
 
@@ -69,10 +78,16 @@ class ASRStreamingConnection(EventEmitter):
         session_id: The session ID returned by the server in the ``ready`` message.
     """
 
-    def __init__(self, transport: WsTransport, session_id: str) -> None:
+    def __init__(
+        self,
+        transport: WsTransport,
+        session_id: str,
+        ready: Optional[Dict[str, Any]] = None,
+    ) -> None:
         super().__init__()
         self._transport = transport
         self._session_id = session_id
+        self._ready = dict(ready or {})
         self._closed = False
         self._receiver_task: Optional[asyncio.Task] = None
         self._done_event = asyncio.Event()
@@ -86,6 +101,22 @@ class ASRStreamingConnection(EventEmitter):
     @property
     def is_closed(self) -> bool:
         return self._closed
+
+    @property
+    def effective_config(self) -> Dict[str, Any]:
+        """The settings the server actually applied, from its ``ready`` frame.
+
+        The server clamps the live tuning knobs (``endpoint_silence_ms`` to
+        200-5000, ``decode_every_ms`` to 320-5000) and echoes the resulting
+        values here. Check this rather than assuming the requested value took
+        effect -- an out-of-range request is clamped silently, not rejected::
+
+            conn = await streaming.stream(
+                config=StreamingConfig(language="en", endpoint_silence_ms=50)
+            )
+            conn.effective_config["endpoint_silence_ms"]   # 200, not 50
+        """
+        return dict(self._ready)
 
     # -- Sending ------------------------------------------------------------
 
@@ -103,11 +134,42 @@ class ASRStreamingConnection(EventEmitter):
             raise TransportError("Connection is closed")
         await self._transport.send_message(audio_bytes)
 
+    async def commit(self) -> None:
+        """Force a turn boundary **without closing the connection**.
+
+        Use this when the caller has stopped speaking and you want the final now,
+        rather than waiting out ``endpoint_silence_ms``. The server finalises the
+        current segment, emits ``final`` (and ``utterance_end``), resets its
+        per-utterance timer, and keeps the socket open for the next turn.
+
+        This is the difference between one WebSocket per call and one per turn.
+        :meth:`end` finalises *and closes*, so a per-turn ``end`` pays a fresh
+        TCP+TLS handshake every turn -- measured at ~300 ms from India, against an
+        ASR that finalises in 39 ms. Driving turns with ``commit`` removes that
+        entirely.
+
+        Returns as soon as the frame is sent; the ``final`` and ``utterance_end``
+        events arrive on the normal event stream.
+
+        Raises:
+            TransportError: If the connection is closed or the send fails.
+        """
+        if self._closed:
+            raise TransportError("Connection is closed")
+        await self._transport.send_message({"type": "commit"})
+
+    async def flush(self) -> None:
+        """Alias for :meth:`commit`, matching the TTS realtime protocol's verb."""
+        await self.commit()
+
     async def end(self) -> None:
         """Signal the end of the audio stream.
 
-        Sends the ``"END"`` text frame and waits for the server to emit the
+        Sends the ``"end"`` text frame and waits for the server to emit the
         ``done`` message, then tears down the receiver task.
+
+        This **closes** the session. For a turn boundary inside a live
+        conversation use :meth:`commit` instead.
         """
         if self._closed:
             return
@@ -309,7 +371,9 @@ class AsyncStreamingASR:
         session_id = raw_ready.get("session_id", "")
         self._logger.debug("Streaming session ready (session_id=%s)", session_id)
 
-        conn = ASRStreamingConnection(transport, session_id)
+        # The ready frame echoes the server-clamped tuning values; keep it so
+        # callers can see what actually took effect via `effective_config`.
+        conn = ASRStreamingConnection(transport, session_id, ready=raw_ready)
         conn._start_receiver()
         return conn
 
