@@ -233,6 +233,7 @@ class STTStream(RecognizeStream):
         self._stt = stt
         self._language = language
 
+
     async def _run(self) -> None:
         await self._stt._resolve_urls()
         streaming = AsyncStreamingASR(
@@ -293,14 +294,21 @@ class STTStream(RecognizeStream):
             # end-of-speech event at all on the current gateway. It now comes from
             # UTTERANCE_END below, which is the real signal.
 
-            @conn.on(StreamingMessageType.UTTERANCE_END)
-            def on_utterance_end(msg):
-                # Fires only after a final whose end_of_utterance is true, so it
-                # marks a genuine turn boundary rather than a forced
-                # maximum-length cut.
-                self._event_ch.send_nowait(
-                    SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
-                )
+            # END_OF_SPEECH is emitted from the FINAL handler below, not from
+            # utterance_end, for two measured reasons:
+            #
+            #  1. Ordering between `final` and `utterance_end` is NOT guaranteed
+            #     -- they are observed in both orders, 1 ms apart. Driving
+            #     END_OF_SPEECH off utterance_end therefore emitted it BEFORE the
+            #     transcript, which inverts LiveKit's convention and lets an agent
+            #     act before it has the text.
+            #  2. The gateway re-endpoints on continued silence: an EMPTY final
+            #     with end_of_utterance=true plus an utterance_end, roughly every
+            #     800 ms for as long as the line stays quiet (measured: 4 of them
+            #     in 6 s of trailing silence). A caller who simply stops talking
+            #     would generate a stream of end-of-speech events.
+            #
+            # Keying off a final that actually carries text is immune to both.
 
             @conn.on(StreamingMessageType.FINAL_REFINED)
             def on_final_refined(msg):
@@ -321,17 +329,23 @@ class STTStream(RecognizeStream):
 
             @conn.on(StreamingMessageType.FINAL)
             def on_final(msg):
-                if msg.text:
-                    self._event_ch.send_nowait(
-                        SpeechEvent(
-                            type=SpeechEventType.FINAL_TRANSCRIPT,
-                            alternatives=[SpeechData(
-                                language=msg.language or self._language,
-                                text=msg.text,
-                                confidence=1.0,
-                            )],
-                        )
+                if not msg.text:
+                    # An empty final is the gateway re-endpointing on silence.
+                    # It carries no transcript and is not a turn boundary, so it
+                    # produces no events at all -- including no usage, which would
+                    # otherwise tick once per ~800 ms of quiet.
+                    return
+
+                self._event_ch.send_nowait(
+                    SpeechEvent(
+                        type=SpeechEventType.FINAL_TRANSCRIPT,
+                        alternatives=[SpeechData(
+                            language=msg.language or self._language,
+                            text=msg.text,
+                            confidence=1.0,
+                        )],
                     )
+                )
                 audio_dur = msg.audio_duration_sec or 0.0
                 self._event_ch.send_nowait(
                     SpeechEvent(
@@ -339,6 +353,13 @@ class STTStream(RecognizeStream):
                         recognition_usage=stt.RecognitionUsage(audio_duration=audio_dur),
                     )
                 )
+                # `end_of_utterance is not False` rather than `is True`: a gateway
+                # that does not send the field at all should still close the turn,
+                # since a final with text is the best endpoint signal available.
+                if msg.end_of_utterance is not False:
+                    self._event_ch.send_nowait(
+                        SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
+                    )
 
             # Send audio from LiveKit's input channel to the SDK connection
             async for data in self._input_ch:

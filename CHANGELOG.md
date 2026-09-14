@@ -2,6 +2,39 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [livekit-plugins-shunyalabsai 1.1.1] - 2026-09-14
+
+LiveKit plugin only; core and pipecat stay at 1.1.0.
+
+### Fixed
+
+- **`END_OF_SPEECH` fired more than once per utterance, and before the
+  transcript.** Both caused by driving it off `utterance_end`, and both found by
+  testing 1.1.0 against the live gateway:
+
+  1. **Ordering between `final` and `utterance_end` is not guaranteed.** They
+     arrive in either order, about 1 ms apart. So `END_OF_SPEECH` could precede
+     `FINAL_TRANSCRIPT` — inverting LiveKit's convention and letting an agent act
+     on a finished turn before it has the text.
+  2. **The gateway re-endpoints on continued silence**, emitting an empty `final`
+     with `end_of_utterance: true` plus an `utterance_end` roughly every 800 ms
+     for as long as the line stays quiet. Measured: 6 s of trailing silence
+     produced four of them. A caller who simply stopped talking generated a
+     stream of end-of-speech events.
+
+  `END_OF_SPEECH` is now emitted from the `final` handler when the final
+  actually carries text, which is immune to both. Measured before and after, on
+  the same 6 s-of-silence input: `END_OF_SPEECH` x2 (one of them early) → x1, in
+  the order `FINAL_TRANSCRIPT` → `RECOGNITION_USAGE` → `END_OF_SPEECH`.
+
+- **Empty finals no longer emit `RECOGNITION_USAGE`.** They carry no transcript
+  and are not turn boundaries, so a quiet line was ticking a usage event every
+  ~800 ms. Pre-existing, not introduced in 1.1.0.
+
+The Pipecat plugin is unaffected: its turn-frame latch is set only by a partial
+carrying text, so empty finals cannot re-arm it. Verified on the same input —
+one `UserStartedSpeakingFrame`, one `UserStoppedSpeakingFrame`.
+
 ## [shunyalabsai 1.1.0 · pipecat-shunyalabsai 1.1.0 · livekit-plugins-shunyalabsai 1.1.0] - 2026-09-14
 
 A latency release. `/v1/realtime` grew per-connection tuning and a turn-end

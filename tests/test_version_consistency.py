@@ -46,12 +46,13 @@ def test_module_version_matches_distribution(pyproject, version_file):
     )
 
 
-def test_all_three_packages_are_released_together():
-    # The three are versioned as a set, and the plugins depend on the core by
-    # lower bound, so a split release is a packaging mistake rather than a
-    # deliberate choice.
-    versions = {p: _dist_version(REPO / p) for p, _ in PACKAGES}
-    assert len(set(versions.values())) == 1, f"version skew across packages: {versions}"
+def test_packages_share_a_minor_series():
+    # The three move together at minor level, because the plugins pin the core by
+    # a >=MAJOR.MINOR.0 lower bound and a feature added to one is usually visible
+    # in the others. Patch levels are deliberately allowed to diverge: a bug in
+    # one plugin should not force a no-op republish of the other two.
+    series = {p: _dist_version(REPO / p).rsplit(".", 1)[0] for p, _ in PACKAGES}
+    assert len(set(series.values())) == 1, f"minor-series skew across packages: {series}"
 
 
 @pytest.mark.parametrize(
@@ -62,8 +63,14 @@ def test_plugins_require_the_matching_core(plugin_pyproject):
     # Both plugins now use StreamingConfig fields and a message type that older
     # cores do not define, so an under-constrained lower bound would install a
     # core that cannot serve them.
-    core = _dist_version(REPO / "pyproject.toml")
+    major, minor, _ = _dist_version(REPO / "pyproject.toml").split(".")
+    floor = f"{major}.{minor}.0"
     text = (REPO / plugin_pyproject).read_text()
-    assert f'"shunyalabsai[all]>={core}"' in text, (
-        f"{plugin_pyproject} must require shunyalabsai[all]>={core}"
+    import re as _re
+    m = _re.search(r'"shunyalabsai\[all\]>=([0-9.]+)"', text)
+    assert m, f"{plugin_pyproject} has no shunyalabsai[all] lower bound"
+    got = tuple(int(x) for x in m.group(1).split("."))
+    assert got >= tuple(int(x) for x in floor.split(".")), (
+        f"{plugin_pyproject} requires shunyalabsai[all]>={m.group(1)}, "
+        f"but it uses features from {floor}"
     )
