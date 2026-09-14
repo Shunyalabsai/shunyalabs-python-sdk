@@ -121,49 +121,74 @@ class TestWireFieldNames:
 
 
 class TestCommit:
+    """Constructed inside the loop, because that is the only way it happens.
+
+    ``ASRStreamingConnection.__init__`` builds an ``asyncio.Event``, and on
+    Python 3.9 that calls ``get_event_loop()``, which raises once a previous
+    ``asyncio.run`` has unset the loop. Constructing synchronously in a test
+    therefore failed on 3.9 while passing on 3.10+.
+
+    The fix belongs here rather than in the library: ``connect()`` builds the
+    connection inside async code (``_streaming.py``, after awaiting the ready
+    frame), so no caller ever constructs one outside a loop. A test that did
+    was testing a situation that cannot arise.
+    """
+
     def test_commit_sends_control_frame_and_keeps_socket_open(self):
-        transport = _FakeTransport()
-        conn = ASRStreamingConnection(transport, "sess-1")
+        async def go():
+            transport = _FakeTransport()
+            conn = ASRStreamingConnection(transport, "sess-1")
+            await conn.commit()
+            return transport, conn
 
-        asyncio.run(conn.commit())
-
+        transport, conn = asyncio.run(go())
         assert transport.sent == [{"type": "commit"}]
-        assert not conn.is_closed
+        assert not conn.is_closed, "commit must finalise WITHOUT closing the socket"
         assert not transport._closed
 
     def test_flush_is_an_alias(self):
-        transport = _FakeTransport()
-        conn = ASRStreamingConnection(transport, "sess-1")
-        asyncio.run(conn.flush())
-        assert transport.sent == [{"type": "commit"}]
+        async def go():
+            transport = _FakeTransport()
+            await ASRStreamingConnection(transport, "sess-1").flush()
+            return transport
+
+        assert asyncio.run(go()).sent == [{"type": "commit"}]
 
     def test_commit_on_closed_connection_raises(self):
         from shunyalabs._core._exceptions import TransportError
 
-        conn = ASRStreamingConnection(_FakeTransport(), "sess-1")
-        conn._closed = True
+        async def go():
+            conn = ASRStreamingConnection(_FakeTransport(), "sess-1")
+            conn._closed = True
+            await conn.commit()
+
         with pytest.raises(TransportError):
-            asyncio.run(conn.commit())
+            asyncio.run(go())
 
 
 class TestEffectiveConfig:
+    @staticmethod
+    def _conn(**kw):
+        async def go():
+            return ASRStreamingConnection(_FakeTransport(), "s", **kw)
+
+        return asyncio.run(go())
+
     def test_ready_echo_is_exposed(self):
         # The gateway clamps and echoes; callers need to see what took effect
         # rather than assume their request was honoured.
-        ready = {
+        conn = self._conn(ready={
             "type": "ready",
             "session_id": "s",
             "endpoint_silence_ms": 200,
             "decode_every_ms": 640,
-        }
-        conn = ASRStreamingConnection(_FakeTransport(), "s", ready=ready)
+        })
         assert conn.effective_config["endpoint_silence_ms"] == 200
 
     def test_effective_config_is_a_copy(self):
-        conn = ASRStreamingConnection(_FakeTransport(), "s", ready={"a": 1})
+        conn = self._conn(ready={"a": 1})
         conn.effective_config["a"] = 999
         assert conn.effective_config["a"] == 1
 
     def test_defaults_to_empty_when_absent(self):
-        conn = ASRStreamingConnection(_FakeTransport(), "s")
-        assert conn.effective_config == {}
+        assert self._conn().effective_config == {}
