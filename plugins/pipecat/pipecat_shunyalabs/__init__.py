@@ -3,5 +3,5 @@
 from .stt import ShunyalabsSTTService
 from .tts import ShunyalabsTTSService
 
-__version__ = "1.1.0"
+__version__ = "1.1.2"
 __all__ = ["ShunyalabsSTTService", "ShunyalabsTTSService"]

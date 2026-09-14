@@ -355,15 +355,43 @@ class ShunyalabsSTTService(STTService):
 
             @self._conn.on(StreamingMessageType.FINAL)
             def on_final(msg):
-                if msg.text:
-                    _schedule(self.push_frame(
-                        TranscriptionFrame(
-                            text=msg.text,
-                            user_id="",
-                            timestamp=str(time.time()),
-                            language=_to_language(msg.language),
-                        )
-                    ))
+                if not msg.text:
+                    # An empty final is the gateway re-endpointing on continued
+                    # silence. Not speech, not a turn.
+                    return
+
+                # A final carrying text is definitive evidence of speech, and it
+                # can arrive with NO partial before it: a short utterance never
+                # reaches a decode tick. Measured on an 8 kHz telephony render
+                # of "Five." -- 1.16 s of audio, ZERO partials, and a final with
+                # text. Arming the latch only on partials therefore dropped the
+                # whole turn: no start frame, so utterance_end found the latch
+                # closed and emitted no stop frame either, so the aggregator
+                # never released the transcript and the LLM was never called.
+                #
+                # Short answers are exactly the ones that matter -- "five",
+                # "yes", "no", "tomorrow" -- so this is not an edge case.
+                had_partials = self._speaking
+                if self._emit_turn_frames and not had_partials:
+                    self._speaking = True
+                    _schedule(self.push_frame(UserStartedSpeakingFrame()))
+
+                _schedule(self.push_frame(
+                    TranscriptionFrame(
+                        text=msg.text,
+                        user_id="",
+                        timestamp=str(time.time()),
+                        language=_to_language(msg.language),
+                    )
+                ))
+
+                if self._emit_turn_frames and not had_partials:
+                    # Nothing preceded this final, so it IS the entire turn.
+                    # Close it here rather than waiting for utterance_end: the
+                    # two are not guaranteed to arrive in a fixed order, and a
+                    # turn left open blocks every later one.
+                    self._speaking = False
+                    _schedule(self.push_frame(UserStoppedSpeakingFrame()))
 
             @self._conn.on(StreamingMessageType.FINAL_REFINED)
             def on_final_refined(msg):

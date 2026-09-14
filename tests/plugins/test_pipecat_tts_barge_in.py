@@ -185,3 +185,39 @@ class TestTuningKnobs:
         assert svc._quality == "low"
         assert svc._clause_first is True
         assert svc._min_buffer_frames == 3
+
+
+class TestShortUtterancesOpenATurn:
+    """A final with text must open a turn even with no partial before it.
+
+    Measured against production on an 8 kHz telephony render of "Five."
+    (1.16 s): zero partials, and a final carrying text. Arming the turn latch
+    only on partials dropped the entire turn -- no start frame, so utterance_end
+    saw a closed latch and emitted no stop frame either, so the aggregator never
+    released the transcript and the LLM was never called. On a real booking call
+    the caller answered "5" to "what party size?" and got silence.
+    """
+
+    def test_final_with_text_arms_and_closes_the_turn(self):
+        import inspect
+        from pipecat_shunyalabs import stt as m
+
+        src = inspect.getsource(m)
+        # The final handler must arm the latch, not just read it.
+        final_src = src.split("StreamingMessageType.FINAL)")[1].split("@self._conn.on")[0]
+        assert "UserStartedSpeakingFrame()" in final_src, \
+            "a final with text must be able to open a turn"
+        assert "UserStoppedSpeakingFrame()" in final_src, \
+            "a final with no preceding partial must also close the turn"
+        assert "had_partials" in final_src, \
+            "the close must be conditional on nothing having preceded it"
+
+    def test_empty_finals_still_do_nothing(self):
+        import inspect
+        from pipecat_shunyalabs import stt as m
+
+        final_src = inspect.getsource(m).split("StreamingMessageType.FINAL)")[1]
+        # The early return on empty text must come first, or silence
+        # re-endpointing would manufacture turns every ~800 ms.
+        head = final_src.split("had_partials")[0]
+        assert "if not msg.text" in head and "return" in head
