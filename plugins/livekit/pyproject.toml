@@ -4,12 +4,12 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "livekit-plugins-shunyalabsai"
-version = "1.1.1"
+version = "1.1.2"
 description = "Shunyalabs ASR & TTS plugin for LiveKit Agents"
 readme = "README.md"
 authors = [{ name = "Shunyalabs", email = "support@shunyalabs.ai" }]
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "livekit-agents>=1.4",
     # Requires the core SDK that carries token-based auth (TokenAuth) and the
