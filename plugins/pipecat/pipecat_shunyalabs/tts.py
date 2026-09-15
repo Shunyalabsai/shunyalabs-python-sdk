@@ -71,16 +71,17 @@ BYTES_PER_SAMPLE = 2
 CHANNELS = 1
 FRAME_MS = 40
 
-# 12 × 40 ms = 480 ms pre-buffer. Bounds the worst observed server-side chunk
-# gap (~280 ms) with headroom for WebRTC encoder and scheduler jitter.
+# 8 × 40 ms = 320 ms pre-buffer. Still bounds the worst observed server-side chunk
+# gap (~280 ms) so a WebRTC encoder (Daily, LiveKit) does not starve audibly, but
+# trims 160 ms off the first-audio budget versus the old 480 ms default. Note the
+# pre-buffer is NOT the first-sound bottleneck on a persistent connection -- warm
+# turns are ~500 ms regardless (the generator runs ~83x realtime, so the buffer
+# fills near-instantly); only the first turn pays the WebSocket connect.
 #
-# This default is sized for WebRTC (Daily, LiveKit), where an encoder starves
-# audibly. Transports without an encoder -- a raw telephony WebSocket, where the
-# carrier holds its own playback buffer -- can run far lower, and 480 ms is a
-# large share of the first-audio budget on a phone call. Both are now
-# constructor arguments (`min_buffer_frames`, `frame_ms`); the defaults are
-# unchanged so existing WebRTC pipelines behave exactly as before.
-MIN_BUFFER_FRAMES = 12
+# Transports without an encoder -- a raw telephony WebSocket, where the carrier
+# holds its own playback buffer -- can safely run lower still: pass
+# `min_buffer_frames=3` (120 ms). Both this and `frame_ms` are constructor args.
+MIN_BUFFER_FRAMES = 8
 
 # How long to wait for the server's `cancelled` acknowledgement on barge-in
 # before giving up and dropping the socket instead.
