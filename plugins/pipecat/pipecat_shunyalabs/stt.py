@@ -257,6 +257,10 @@ class ShunyalabsSTTService(STTService):
         # Serialize reconnects so a burst of audio frames arriving while the
         # socket is down cannot spawn several concurrent reconnect attempts.
         self._reconnect_lock = asyncio.Lock()
+        # Ordered frame dispatch, created on connect. Declared here so a
+        # disconnect that runs before any connect cannot AttributeError.
+        self._dispatch_q = None
+        self._dispatch_task = None
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -340,8 +344,47 @@ class ShunyalabsSTTService(STTService):
             # background threads can safely schedule coroutines.
             loop = asyncio.get_running_loop()
 
+            # ORDERED dispatch. This was `call_soon_threadsafe(ensure_future,
+            # coro)`, which preserves the order frames are SCHEDULED in but not
+            # the order they are DELIVERED in: `ensure_future` spawns a task per
+            # frame, the tasks run concurrently, and two that suspend inside
+            # `push_frame` can finish in either order.
+            #
+            # That lost whole clauses of a caller's sentence. The gateway is
+            # strict -- it awaits a segment's `final` and only then sends
+            # `utterance_end` (ws.py, same loop iteration, one socket) -- and the
+            # callbacks fire in that order too. But `TranscriptionFrame` and the
+            # `UserStoppedSpeakingFrame` that `utterance_end` produces became two
+            # racing tasks, so the stop could land first. The aggregator then
+            # closed the turn and handed the LLM everything EXCEPT that segment.
+            #
+            # Measured on a 28-word Hindi sentence with a 600 ms breath in it:
+            # batch transcribed 28/28 words, this path delivered 17 and the agent
+            # answered without the rate it had just been told. One queue, one
+            # consumer, FIFO: frames reach the pipeline in the order the gateway
+            # sent them. No added latency -- the work is the same, only serialised
+            # -- and it fixes every event type rather than this one symptom.
+            self._dispatch_q = asyncio.Queue()
+
+            async def _dispatch_worker():
+                while True:
+                    coro = await self._dispatch_q.get()
+                    if coro is None:            # shutdown sentinel
+                        break
+                    try:
+                        await coro
+                    except Exception:           # noqa: BLE001
+                        # One bad frame must not stop the queue; a dead worker
+                        # silently freezes every later turn on the call.
+                        logger.exception(
+                            "ShunyalabsSTTService: dispatch failed for a frame")
+
+            self._dispatch_task = loop.create_task(_dispatch_worker())
+
             def _schedule(coro):
-                loop.call_soon_threadsafe(asyncio.ensure_future, coro)
+                # put_nowait is thread-safe enough only via the loop, because the
+                # gateway's callbacks do not run on it.
+                loop.call_soon_threadsafe(self._dispatch_q.put_nowait, coro)
 
             @self._conn.on(StreamingMessageType.PARTIAL)
             def on_partial(msg):
@@ -462,6 +505,22 @@ class ShunyalabsSTTService(STTService):
             except Exception:
                 pass
         self._conn = None
+
+        # Stop the ordered dispatcher AFTER the socket is gone, so no further
+        # frames can be queued, and drain what is already queued first: the
+        # final of the last turn is often the newest thing on the queue, and
+        # cancelling here would drop the caller's closing words.
+        if self._dispatch_q is not None and self._dispatch_task is not None:
+            try:
+                self._dispatch_q.put_nowait(None)      # shutdown sentinel
+                await asyncio.wait_for(self._dispatch_task, timeout=2.0)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
+                # A frame wedged downstream must not hold the call open.
+                self._dispatch_task.cancel()
+            except Exception:  # noqa: BLE001
+                logger.exception("ShunyalabsSTTService: dispatcher shutdown failed")
+        self._dispatch_q = None
+        self._dispatch_task = None
         self._audio_buffer.clear()
         # Clear the speaking latch. A reconnect mid-utterance would otherwise
         # leave it stuck True, and every subsequent turn-start frame would be
