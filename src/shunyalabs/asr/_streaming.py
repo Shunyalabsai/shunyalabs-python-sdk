@@ -280,8 +280,42 @@ class ASRStreamingConnection(EventEmitter):
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            self._logger.error("Receiver loop error: %s", exc, exc_info=True)
+            # A 1000/OK close is the stream ENDING, not failing, and logging it
+            # at ERROR made every clean shutdown look like a fault: a run of
+            # eighteen calls produced fifty-eight ERROR lines, all of them
+            # "received 1000 (OK); then sent 1000 (OK)". Real failures were in
+            # there too and nobody could have picked them out.
+            if _is_clean_close(exc):
+                self._logger.debug("Receiver loop ended: stream closed (%s)", exc)
+            else:
+                self._logger.error("Receiver loop error: %s", exc, exc_info=True)
             self._done_event.set()
+
+
+def _is_clean_close(exc: BaseException) -> bool:
+    """True when this exception is a normal end of stream, not a fault.
+
+    Walks the cause/context chain: the transport flattens the close reason
+    into a `TransportError` message, so the only reliable signal is the
+    original `ConnectionClosedOK` (or a 1000/1001 close code) underneath it.
+    """
+    try:
+        from websockets.exceptions import ConnectionClosedOK
+    except Exception:                                   # noqa: BLE001
+        ConnectionClosedOK = ()                         # type: ignore[assignment]
+
+    seen: set[int] = set()
+    cur: BaseException | None = exc
+    while cur is not None and id(cur) not in seen:
+        seen.add(id(cur))
+        if ConnectionClosedOK and isinstance(cur, ConnectionClosedOK):
+            return True
+        for attr in ("rcvd", "sent"):
+            code = getattr(getattr(cur, attr, None), "code", None)
+            if code in (1000, 1001):
+                return True
+        cur = cur.__cause__ or cur.__context__
+    return False
 
 
 # ---------------------------------------------------------------------------

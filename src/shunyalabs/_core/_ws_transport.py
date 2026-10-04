@@ -146,9 +146,13 @@ class WsTransport:
                 return raw_data
 
         except json.JSONDecodeError as e:
-            raise TransportError(f"Invalid JSON received: {e}")
+            raise TransportError(f"Invalid JSON received: {e}") from e
         except Exception as e:
-            raise TransportError(f"Receive message failed: {e}")
+            # `from e` so a caller can tell a normal close from a fault. The
+            # chain is the only thing that distinguishes them once the reason
+            # has been flattened into a message string, and without it every
+            # clean 1000/OK shutdown was indistinguishable from a real error.
+            raise TransportError(f"Receive message failed: {e}") from e
 
     async def close(self) -> None:
         """Close the WebSocket connection."""
