@@ -4,7 +4,7 @@ from .stt import ShunyalabsSTTService
 from .tts import ShunyalabsTTSService
 from .turns import ShunyaUserTurnStrategies
 
-__version__ = "1.2.0"
+__version__ = "1.1.5"
 __all__ = [
     "ShunyalabsSTTService",
     "ShunyalabsTTSService",

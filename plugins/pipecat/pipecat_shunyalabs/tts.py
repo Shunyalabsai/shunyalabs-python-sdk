@@ -336,6 +336,36 @@ class ShunyalabsTTSService(TTSService):
         Never raises -- any uncertainty about socket state ends in a clean
         reconnect instead.
         """
+        # STOP SPEAKING FIRST, before anything here can block.
+        #
+        # This is the signal that reaches a `run_tts` which is mid-utterance,
+        # and it has to be sent without waiting for a lock that `run_tts`
+        # itself is holding. It used to sit at the END of this function,
+        # behind the acquire below, and that ordering cost ten seconds of
+        # silence on a live call:
+        #
+        #   * `run_tts` holds `_transport_lock` for the whole generator, and
+        #     the generator PACES its audio in real time -- a 7.75s utterance
+        #     holds the lock for 7.75s.
+        #   * the acquire below therefore timed out, this function closed the
+        #     transport and RETURNED EARLY, never reaching the reset.
+        #   * the pacing loop's bail-out tests `_pace_next_time is None`,
+        #     which nothing had set, so it kept pacing and kept the lock.
+        #   * the next turn blocked on that lock until the interrupted
+        #     utterance would have finished speaking.
+        #
+        # Measured on the live agent: of 15 turns slower than two seconds, 14
+        # were within twenty seconds of a barge-in; the worst waited 12.1s and
+        # then produced 11ms of audio.
+        #
+        # Written without the lock deliberately. These three fields are set
+        # here and only READ by the pacing loop, which uses them to decide
+        # whether to stop -- so an unsynchronised write is not a race, it is
+        # the whole mechanism.
+        self._pace_buffer = bytearray()
+        self._pace_next_time = None
+        self._pace_started = False
+
         transport = self._transport
         if transport is None or not self._session_ready:
             await self._close_transport()
@@ -369,19 +399,16 @@ class ShunyalabsTTSService(TTSService):
             await self._close_transport()
             return
 
-        # Session is clean and stays open. Pacing still resets: the buffered PCM
-        # belongs to the interrupted utterance and must not be spoken, and
-        # `_pace_next_time` has to be cleared alongside `_pace_started` or the
-        # pacing loop compares None to a timestamp.
+        # Session is clean and stays open. Pacing was already reset at the top
+        # of this function -- see the note there for why it cannot wait until
+        # here -- and the fields are left alone now so that a `run_tts` which
+        # started again while we were draining is not clobbered.
         #
         # So the next turn re-pays the pre-buffer but NOT the reconnect. That is
         # the expensive half: a TCP+TLS dial plus a fresh `ready` handshake to a
         # remote endpoint, all of it while the caller waits. Pair this with a
         # lower `min_buffer_frames` on transports that do not need 480 ms and
         # barge-in recovery costs almost nothing.
-        self._pace_buffer = bytearray()
-        self._pace_next_time = None
-        self._pace_started = False
         self._transport_lock.release()
 
     async def run_tts(
@@ -432,6 +459,20 @@ class ShunyalabsTTSService(TTSService):
                             self._pace_next_time = now
                         else:
                             await asyncio.sleep(self._pace_next_time - now)
+                        # That sleep yields, and an interruption arriving during
+                        # it runs _handle_interruption on another task, which
+                        # sets _pace_next_time back to None (see the note there).
+                        # Resuming here would then do `None += frame_ms`, which
+                        # raises inside the frame processor and kills TTS for the
+                        # REST OF THE CALL -- non-fatal, so every later turn just
+                        # goes unanswered. Seen on the meera-voice eval suite
+                        # 2026-09-21: the agent fell silent mid-booking and four
+                        # assertions failed for a reason unrelated to them.
+                        #
+                        # The buffer was cleared by that same reset, so there is
+                        # nothing left of this utterance to pace: stop.
+                        if self._pace_next_time is None or not self._pace_started:
+                            break
                         chunk = bytes(self._pace_buffer[:frame_bytes])
                         del self._pace_buffer[:frame_bytes]
                         yield self._build_audio_frame(chunk, context_id)

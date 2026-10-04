@@ -164,10 +164,16 @@ class TestSTTDefaultsAreNonBreaking:
 
 class TestTuningKnobs:
     def test_defaults_are_unchanged(self):
-        # WebRTC transports rely on the 480 ms pre-buffer; this release must not
-        # move it for them.
+        # 8 frames of 40 ms = a 320 ms pre-buffer. It was 12 (480 ms) and was
+        # lowered deliberately in 7beb993 to cut first-audio latency; this test
+        # was not updated with it, so it has been failing ever since and
+        # reporting a default that has not existed for several releases.
+        #
+        # The point of the test still stands: the number is a latency/underrun
+        # trade and must not drift by accident. Transports that need a deeper
+        # buffer pass `min_buffer_frames` explicitly.
         svc = _service()
-        assert svc._min_buffer_frames == 12
+        assert svc._min_buffer_frames == 8
         assert svc._frame_ms == 40
 
     def test_frame_bytes_follows_frame_ms(self):
