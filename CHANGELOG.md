@@ -2,6 +2,28 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [pipecat-shunyalabsai 1.1.6] - 2026-10-23
+
+Pipecat plugin only; core stays at 1.1.0, LiveKit at 1.1.2. Default behaviour is unchanged from 1.1.5
+(verified on the live gateway: identical transcripts and timing, 10 of 10 clips).
+
+### Changed
+
+- **Documented the gateway as it now behaves.** asrv2prod's default `endpoint_silence_ms` is 1000 ms
+  since 2026-10-23 (it was 3000; this plugin said 700). At that default the transcript reaches the
+  pipeline about 1 s after the speaker stops: measured on 30 clips each, English 1.01 s, Hindi 0.99 s,
+  Hinglish 1.25 s median (3.0 s, 3.0 s and 2.5 s before the gateway change).
+- `language="hinglish"` documented for Hindi-English speech; `codeswitch=True` with `hi`/`en` documented
+  as selecting the Hinglish model (no `final_refined`), not a refinement pass.
+
+### Added
+
+- **`commit_on_vad_stop` (off by default) and `commit_delay_s` (0.8 s).** When on, the transport VAD's
+  stop, followed by `commit_delay_s` of continued silence, commits the turn and marks the answering
+  final `finalized`, so pipecat ends the turn on its arrival. Measured against the 1000 ms gateway
+  default it saves under 0.1 s on English and Hindi and costs Hinglish accuracy (folded CER 35.1% ->
+  37.5%), which is why it is opt-in; at 0.4 s English accuracy also dropped (CER 2.2% -> 2.6%).
+
 ## [livekit-plugins-shunyalabsai 1.1.1] - 2026-09-14
 
 LiveKit plugin only; core and pipecat stay at 1.1.0.

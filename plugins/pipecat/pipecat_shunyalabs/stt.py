@@ -26,6 +26,7 @@ Usage::
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import threading
 import os
@@ -41,7 +42,10 @@ from pipecat.frames.frames import (
     TranscriptionFrame,
     UserStartedSpeakingFrame,
     UserStoppedSpeakingFrame,
+    VADUserStartedSpeakingFrame,
+    VADUserStoppedSpeakingFrame,
 )
+from pipecat.processors.frame_processor import FrameDirection
 from pipecat.services.stt_service import STTService
 from pipecat.transcriptions.language import Language
 
@@ -66,6 +70,18 @@ _DEFAULT_WS_URL = "wss://asrv2prod.shunyalabs.ai/v1/realtime"
 # sub-frames before feeding them. Small frames pass through untouched, and every
 # byte held here is latency added in front of an ASR that finalises in 39 ms.
 _MIN_SEND_BYTES = 3200
+
+# P99 seconds from the transport VAD's stop to the final, when that stop commits the turn
+# (commit_on_vad_stop). pipecat's turn-stop strategy waits this long for a transcript that is
+# not marked finalized; its own default is a 1.0 s guess.
+_TTFS_P99_S = 0.6
+
+# Continued silence after the VAD stop before committing. pipecat's VAD stops after 0.2 s, which a
+# mid-sentence pause easily reaches -- and finalising there splits the sentence into segments the
+# decoder sees apart. Measured: splitting at 300 ms pauses (endpoint_silence_ms=300) doubled Hindi
+# CER (10.6% -> 23.2%), and a 0.4 s delay still cost English accuracy (CER 2.2% -> 2.6%, 30 clips).
+# A VAD start inside the window cancels the commit, so a pause is not a cut.
+_COMMIT_DELAY_S = 0.8
 
 # The ASR gateway may emit the detected language either as an ISO code
 # (e.g. "en") or as a human-readable display name (e.g. "English"). Only
@@ -161,31 +177,52 @@ class ShunyalabsSTTService(STTService):
     is entirely the transport VAD's job -- exactly as in 1.0.x.
 
     **Latency.** ``endpoint_silence_ms`` is the dominant control: it is pure
-    wall-clock delay after the speaker stops before a final can be emitted.
-    ``min_send_bytes`` is the other one worth knowing about -- it is buffering
+    wall-clock delay after the speaker stops before a final can be emitted. At the
+    gateway default (1000 ms on asrv2prod since 2026-10-23) the transcript reaches
+    the pipeline about 1 s after the speaker stops (measured: English 1.01 s, Hindi
+    0.99 s, Hinglish 1.25 s median over 30 clips each). ``commit_on_vad_stop`` can
+    end the turn from the transport VAD instead; measured against that default it
+    saves under 0.1 s and costs Hinglish accuracy, so it is off unless asked for.
+    ``min_send_bytes`` is the other control worth knowing about -- it is buffering
     added in front of the gateway.
 
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY``.
-        language: Language code (e.g. ``"en"``, ``"hi"``) or ``"auto"``.
+        language: Language code (e.g. ``"en"``, ``"hi"``), ``"hinglish"`` for
+            Hindi-English mixed speech (the gateway works out which leads), or
+            ``"auto"``. Speech that is only English should go as ``"en"``.
         url: WebSocket endpoint URL.
         sample_rate: Audio sample rate in Hz (default 16 000).
         min_send_bytes: Bytes to accumulate before forwarding. Default is 100 ms
             at 16 kHz; lower it proportionally for 8 kHz telephony.
         endpoint_silence_ms: Silence before the gateway emits a final. ``None``
-            takes the server default (700 ms). Server clamps to 200-5000.
+            takes the server default -- 1000 ms on asrv2prod since 2026-10-23 (the
+            ``ready`` echo reports it). Server clamps to 200-5000. Below about
+            300 ms a mid-sentence pause splits the sentence and costs accuracy.
         decode_every_ms: Interim-result cadence. ``None`` takes the server
-            default (640 ms). Raising it cuts per-stream GPU cost at the price of
+            default (1280 ms on asrv2prod). Raising it cuts per-stream GPU cost at the price of
             coarser partials. Server clamps to 320-5000.
         vad: ``"silero"`` to opt into model-based endpointing, worth it on noisy
             telephony audio where energy thresholding may never register silence.
-        codeswitch: Opt into code-switch refinement (a ``final_refined`` follows
-            the ``final`` with correct scripts).
+        codeswitch: With ``"hi"`` or ``"en"``, selects the Hinglish model, which
+            writes Hindi in Devanagari and English in Latin script itself (no
+            ``final_refined``). With other languages, a ``final_refined`` with
+            corrected scripts follows each ``final``.
         model: Explicit model/tier. ``None`` lets the gateway route on language.
         emit_turn_frames: Emit ``UserStartedSpeakingFrame`` /
             ``UserStoppedSpeakingFrame`` from the gateway's own endpointing.
             Default ``False``; requires ``ExternalUserTurnStrategies`` on the
             user aggregator. See the note above.
+        commit_on_vad_stop: After ``VADUserStoppedSpeakingFrame`` and
+            ``commit_delay_s`` of continued silence, send the buffered audio and
+            :meth:`commit`, and mark the answering final ``finalized``. Default
+            ``False``: at the gateway's 1000 ms endpoint it measured under 0.1 s
+            faster on English and Hindi and less accurate on Hinglish. Needs a
+            VAD in the pipeline; without one nothing changes.
+        commit_delay_s: Silence after the VAD stop before committing (default
+            0.8 s). A VAD start inside it cancels the commit, so a mid-sentence
+            pause does not split the sentence -- splitting at short pauses costs
+            accuracy (Hindi CER doubled at 300 ms; English worse at 0.4 s).
         **kwargs: Forwarded to ``STTService.__init__``.
     """
 
@@ -203,11 +240,17 @@ class ShunyalabsSTTService(STTService):
         codeswitch: Optional[bool] = None,
         model: Optional[str] = None,
         emit_turn_frames: bool = False,
+        commit_on_vad_stop: bool = False,
+        commit_delay_s: float = _COMMIT_DELAY_S,
         **kwargs,
     ) -> None:
         # Initialize settings for pipecat >=0.0.95 (backward-compatible)
         if _STTSettings is not None:
             kwargs.setdefault("settings", _STTSettings(model=None, language=language))
+        # A committed final is measured, not guessed: tell the turn-stop strategy so it does not
+        # wait its 1.0 s default for one. Only pipecat versions that know the knob get it.
+        if commit_on_vad_stop and "ttfs_p99_latency" in inspect.signature(STTService.__init__).parameters:
+            kwargs.setdefault("ttfs_p99_latency", _TTFS_P99_S)
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key or os.environ.get("SHUNYALABS_API_KEY", "")
         if not self._api_key:
@@ -242,6 +285,12 @@ class ShunyalabsSTTService(STTService):
         self._codeswitch = codeswitch
         self._model = model
         self._emit_turn_frames = emit_turn_frames
+        self._commit_on_vad_stop = commit_on_vad_stop
+        self._commit_delay_s = max(0.0, float(commit_delay_s))
+        self._commit_task = None       # the pending delayed commit, cancelled by a VAD start
+        # Set when a VAD stop committed the turn; the next raw final is that commit's answer and
+        # is marked finalized. Cleared on VAD start.
+        self._awaiting_commit_final = False
         # True between the first partial of an utterance and its utterance_end,
         # so the start/stop frames are emitted as matched pairs.
         self._speaking = False
@@ -445,13 +494,14 @@ class ShunyalabsSTTService(STTService):
                 if opened:
                     _schedule(self.push_frame(UserStartedSpeakingFrame()))
 
-                _schedule(self.push_frame(
+                _schedule(self._push_transcription(
                     TranscriptionFrame(
                         text=msg.text,
                         user_id="",
                         timestamp=str(time.time()),
                         language=_to_language(msg.language),
-                    )
+                    ),
+                    refined=False,
                 ))
 
                 if opened and self._close_turn():
@@ -469,13 +519,14 @@ class ShunyalabsSTTService(STTService):
                 # are never held back waiting for this, so it arrives afterwards and is pushed
                 # as its own transcription rather than being dropped.
                 if msg.text:
-                    _schedule(self.push_frame(
+                    _schedule(self._push_transcription(
                         TranscriptionFrame(
                             text=msg.text,
                             user_id="",
                             timestamp=str(time.time()),
                             language=_to_language(msg.language),
-                        )
+                        ),
+                        refined=True,
                     ))
 
             @self._conn.on(StreamingMessageType.ERROR)
@@ -489,6 +540,7 @@ class ShunyalabsSTTService(STTService):
 
     async def _disconnect(self) -> None:
         """Flush remaining audio, send END, and close the connection."""
+        await self._cancel_pending_commit()
         if self._conn and not self._conn.is_closed:
             if self._audio_buffer:
                 try:
@@ -560,6 +612,71 @@ class ShunyalabsSTTService(STTService):
             await conn.commit()
         except Exception as exc:  # noqa: BLE001 - never break the audio path
             logger.warning("ShunyalabsSTTService commit failed: %s", exc)
+
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if not self._commit_on_vad_stop:
+            return
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            await self._cancel_pending_commit()
+            self._awaiting_commit_final = False
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            await self._cancel_pending_commit()
+            coro = self._delayed_commit()
+            make = getattr(self, "create_task", None)
+            self._commit_task = make(coro) if make else asyncio.ensure_future(coro)
+
+    async def _cancel_pending_commit(self) -> None:
+        task, self._commit_task = self._commit_task, None
+        if task is None or task.done():
+            return
+        cancel = getattr(self, "cancel_task", None)
+        if cancel:
+            await cancel(task)
+        else:
+            task.cancel()
+
+    async def _delayed_commit(self) -> None:
+        if self._commit_delay_s:
+            await asyncio.sleep(self._commit_delay_s)
+        await self._commit_on_vad()
+
+    async def _commit_on_vad(self) -> None:
+        """The speaker stopped and stayed silent: finalise now, not after the silence timer.
+
+        The same audio reaches the same decoder; it is only finalised sooner. The tail held in
+        ``_audio_buffer`` goes first, or the last words could miss the segment being finalised.
+        """
+        conn = self._conn
+        if conn is None or conn.is_closed:
+            return
+        if self._audio_buffer:
+            tail = bytes(self._audio_buffer)
+            self._audio_buffer.clear()
+            try:
+                await conn.send_audio(tail)
+            except Exception as exc:  # noqa: BLE001 - the gateway's timer still ends the turn
+                logger.warning("ShunyalabsSTTService: tail send before commit failed: %s", exc)
+                return
+        if hasattr(self, "request_finalize"):
+            self.request_finalize()
+        self._awaiting_commit_final = True
+        await self.commit()
+
+    async def _push_transcription(self, frame: TranscriptionFrame, refined: bool) -> None:
+        """Push a final from the ordered dispatch queue, marking a commit's answer finalized.
+
+        Runs on the queue, so the mark lands on the frame that answers the commit and never on an
+        earlier final still waiting to be delivered. The answer is the first raw final after the
+        commit, code-switch or not: a refinement only follows on plans that include it, and the
+        ``ready`` echo does not say whether this one does, so waiting for it would hold every
+        turn on the plans without it. A refinement that does arrive is pushed as before.
+        """
+        if self._awaiting_commit_final and not refined:
+            self._awaiting_commit_final = False
+            if hasattr(self, "confirm_finalize"):
+                self.confirm_finalize()
+        await self.push_frame(frame)
 
     # ------------------------------------------------------------------
     # Audio ingestion
