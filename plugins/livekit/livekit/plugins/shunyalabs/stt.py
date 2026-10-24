@@ -72,9 +72,9 @@ class STT(stt.STT):
         ws_url: WebSocket streaming endpoint URL.
         endpoint_silence_ms: Silence before the gateway emits a final, and so the
             dominant control over how long a speaker waits after finishing.
-            ``None`` takes the server default (700 ms); clamped to 200-5000.
+            ``None`` takes the server default (1000 ms on asrv2prod since 2026-10-23); clamped to 200-5000.
         decode_every_ms: Interim-result cadence. ``None`` takes the server
-            default (640 ms); clamped to 320-5000. Raising it lowers per-stream
+            default (1280 ms on asrv2prod); clamped to 320-5000. Raising it lowers per-stream
             GPU cost at the price of coarser interim transcripts.
         vad: ``"silero"`` to opt into model-based endpointing. Worth it on noisy
             telephony audio, where energy thresholding can fail to register
@@ -366,6 +366,11 @@ class STTStream(RecognizeStream):
                 if isinstance(data, rtc.AudioFrame):
                     pcm = data.data.tobytes()
                     await conn.send_audio(pcm)
+                elif isinstance(data, self._FlushSentinel):
+                    # `RecognizeStream.flush()` marks the end of a segment. It used to be dropped
+                    # here, so the segment waited out the gateway's silence timer (endpoint_silence_ms).
+                    # `commit` finalises it now and keeps the socket open for the next one.
+                    await conn.commit()
 
             # Input exhausted — signal end of stream
             await conn.end()

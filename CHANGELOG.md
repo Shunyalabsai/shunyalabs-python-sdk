@@ -2,6 +2,22 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [livekit-plugins-shunyalabsai 1.1.3] - 2026-10-24
+
+LiveKit plugin only; core stays at 1.1.0, Pipecat at 1.1.6.
+
+### Fixed
+
+- **`RecognizeStream.flush()` now finalises the segment immediately.** It was dropped, so a flushed
+  segment waited out the gateway's `endpoint_silence_ms`. It now sends `commit`, which finalises at once
+  and keeps the socket open for the next turn. Measured from a laptop against the live gateway, 30 real
+  clips per language, flush 0.3 s after speech: final after the end of speech English 1.11 -> 1.01 s,
+  Hindi 1.03 -> 0.91 s, Tamil 1.08 -> 1.03 s, Marathi 1.09 -> 1.00 s, Hinglish 1.40 -> 1.29 s; accuracy
+  equal or better (Hinglish script-agnostic CER 29.6% -> 26.6%). Without a flush, 1.1.3 gives the
+  same transcripts as 1.1.2 on all 150 clips.
+- Docstrings: the gateway's `endpoint_silence_ms` default is 1000 ms (since 2026-10-23) and
+  `decode_every_ms` 1280 ms.
+
 ## [pipecat-shunyalabsai 1.1.6] - 2026-10-23
 
 Pipecat plugin only; core stays at 1.1.0, LiveKit at 1.1.2. Default behaviour is unchanged from 1.1.5
