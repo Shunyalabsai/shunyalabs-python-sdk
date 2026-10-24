@@ -166,3 +166,14 @@ class TestTTSCompletion:
         assert completion.type == "completion"
         assert completion.status == "complete"
         assert completion.total_chunks == 5
+
+
+class TestHinglishLanguage:
+    def test_hinglish_is_accepted(self):
+        # The gateway serves code-mixed Hindi-English as language "hinglish";
+        # a 3-character cap made it impossible to request from the SDK.
+        assert TTSConfig(language="hinglish", voice="Nisha").language == "hinglish"
+
+    def test_language_is_still_bounded(self):
+        with pytest.raises(Exception):
+            TTSConfig(language="x" * 17, voice="Nisha")

@@ -47,7 +47,7 @@ class TTSConfig(BaseModel):
 
     Attributes:
         model: Model name. Must be ``"zero-indic"``.
-        language: ISO 639-1/639-2 language code (2--3 chars). Required.
+        language: ISO 639-1/639-2 language code (2--3 chars), or ``hinglish``. Required.
         voice: Speaker voice name (e.g. ``"Varun"``, ``"Nisha"``). Required
             unless ``reference_wav`` is provided.
         response_format: Output audio format (default ``"wav"``).
@@ -68,8 +68,10 @@ class TTSConfig(BaseModel):
     language: str = Field(
         ...,
         min_length=2,
-        max_length=3,
-        description="ISO 639-1/639-2 language code (e.g. 'en', 'hi', 'ta').",
+        # 3 rejected "hinglish", which the gateway serves (code-mixed Hindi-English),
+        # so neither the batch path nor the LiveKit plugin could request it at all.
+        max_length=16,
+        description="ISO 639-1/639-2 language code (e.g. 'en', 'hi', 'ta'), or 'hinglish'.",
     )
     voice: Optional[str] = Field(
         default=None,

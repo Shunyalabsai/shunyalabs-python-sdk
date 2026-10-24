@@ -2,6 +2,28 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [livekit-plugins-shunyalabsai 1.1.4, shunyalabsai 1.1.1] - 2026-10-24
+
+LiveKit plugin and core; Pipecat stays at 1.1.6.
+
+### Fixed
+
+- **Hinglish TTS works through the SDK.** `TTSConfig.language` was capped at 3 characters, so
+  `"hinglish"` was rejected on both batch and streaming. The cap is now 16 (core 1.1.1).
+
+### Changed
+
+- **LiveKit TTS streams keep their connection and start speaking while the LLM is still writing.**
+  Each segment used to open a new `/v1/realtime` socket (connect + ready ~0.6 s before any text) and
+  held all text until flush. A `TTS` now keeps a pool of open sessions (`prewarm()` opens one before the
+  first turn; `aclose()` closes the pool), each pushed delta goes to the gateway at once, LiveKit's flush
+  becomes the gateway's `flush`, and its `done` ends the segment. Interruption sends `cancel` and drains
+  to `cancelled` before a session is reused; a socket found dead before any audio is replaced and the
+  turn replayed. `synthesize()` (batch) is unchanged. Measured against the live gateway, 3 multi-sentence
+  replies x 2 voices, first audio p50: whole reply English 0.61 -> 0.22 s, Hindi 0.63 -> 0.25 s, Hinglish
+  (was failing) 0.26 s; LLM-streamed reply (20 words/s) English 1.94 -> 0.47 s, Hindi 2.02 -> 0.51 s,
+  Hinglish 0.51 s. No audio frame late by more than 40 ms; round-trip CER unchanged within noise.
+
 ## [livekit-plugins-shunyalabsai 1.1.3] - 2026-10-24
 
 LiveKit plugin only; core stays at 1.1.0, Pipecat at 1.1.6.
