@@ -2,6 +2,24 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [Unreleased: pipecat-shunyalabsai] - 2026-10-25
+
+Pipecat plugin only, not released; the version stays 1.1.6. With the new option off the plugin behaves as
+1.1.6 (verified on the live gateway: identical transcripts and timing, 10 of 10 Hindi clips).
+
+### Added (off by default; measured, not recommended)
+
+- **`commit_on_turn_end`, with `turn_analyzer` and `turn_commit_languages`.** At each VAD stop the plugin
+  asks a turn model (pipecat's Smart Turn v3.2 by default) whether the speaker has finished; if so it
+  commits the segment at once and marks the answering final `finalized`, otherwise the gateway's 1000 ms
+  endpoint ends the segment as before. Measured live against 1.1.6 with Silero VAD in front (stop 0.2 s),
+  30 clips per language in ten languages, plus the same clips with 0.6 s of silence inserted mid-sentence:
+  the final arrives about 0.6 s sooner (English p50 1.00 -> 0.41 s, Hindi 1.01 -> 0.40 s, Hinglish 1.28 ->
+  0.69 s), but the model called 58-89% of the pauses inside a clip finished, so sentences were split and
+  WER/CER rose in every language on both sets (English CER 1.8% -> 5.5%, Hindi 5.4% -> 6.2%, Hinglish
+  folded CER 22.8% -> 28.0%; split clips English 0 -> 7, Hindi 2 -> 13). Restricting it to Smart Turn's
+  training languages does not help: English, Hindi and Bengali fail like the rest. Default stays off.
+
 ## [livekit-plugins-shunyalabsai 1.1.4, shunyalabsai 1.1.1] - 2026-10-24
 
 LiveKit plugin and core; Pipecat stays at 1.1.6.

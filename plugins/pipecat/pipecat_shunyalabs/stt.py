@@ -31,7 +31,7 @@ import logging
 import threading
 import os
 import time
-from typing import AsyncGenerator, Optional
+from typing import AsyncGenerator, Iterable, Optional
 
 from pipecat.frames.frames import (
     CancelFrame,
@@ -53,6 +53,11 @@ try:
     from pipecat.services.settings import STTSettings as _STTSettings
 except ImportError:
     _STTSettings = None
+
+try:
+    from pipecat.audio.turn.base_turn_analyzer import BaseTurnAnalyzer, EndOfTurnState
+except ImportError:  # pipecat without turn analyzers; commit_on_turn_end then cannot be enabled
+    BaseTurnAnalyzer = EndOfTurnState = None
 
 from shunyalabs._core._auth import TokenAuth, resolve_endpoint
 from shunyalabs._core._models import WsConnectionConfig
@@ -82,6 +87,14 @@ _TTFS_P99_S = 0.6
 # CER (10.6% -> 23.2%), and a 0.4 s delay still cost English accuracy (CER 2.2% -> 2.6%, 30 clips).
 # A VAD start inside the window cancels the commit, so a pause is not a cut.
 _COMMIT_DELAY_S = 0.8
+
+# Languages commit_on_turn_end runs for unless told otherwise: Smart Turn v3.2's training languages
+# (pipecat-ai/smart-turn README: 23, among them English, Hindi, Bengali and Marathi) that the gateway
+# serves. Tamil, Telugu, Kannada, Malayalam, Gujarati and Punjabi are not among them. Being trained on
+# a language did not make the model safe to commit on: English, Hindi and Bengali split sentences and
+# lost accuracy like the others (2026-10-25, 30 FLEURS clips each, plus the same clips with a 0.6 s
+# pause inserted mid-sentence).
+_SMART_TURN_LANGUAGES = frozenset({"en", "hi", "bn", "mr"})
 
 # The ASR gateway may emit the detected language either as an ISO code
 # (e.g. "en") or as a human-readable display name (e.g. "English"). Only
@@ -183,6 +196,9 @@ class ShunyalabsSTTService(STTService):
     0.99 s, Hinglish 1.25 s median over 30 clips each). ``commit_on_vad_stop`` can
     end the turn from the transport VAD instead; measured against that default it
     saves under 0.1 s and costs Hinglish accuracy, so it is off unless asked for.
+    ``commit_on_turn_end`` ends it when a turn model says the speaker finished:
+    about 0.6 s faster, but the model calls many mid-sentence pauses finished, so it
+    splits sentences and costs accuracy in every language measured -- also off.
     ``min_send_bytes`` is the other control worth knowing about -- it is buffering
     added in front of the gateway.
 
@@ -223,6 +239,25 @@ class ShunyalabsSTTService(STTService):
             0.8 s). A VAD start inside it cancels the commit, so a mid-sentence
             pause does not split the sentence -- splitting at short pauses costs
             accuracy (Hindi CER doubled at 300 ms; English worse at 0.4 s).
+        commit_on_turn_end: At each ``VADUserStoppedSpeakingFrame``, ask a turn
+            model whether the speaker has finished, and if it says so commit at
+            once and mark the answering final ``finalized``; otherwise do nothing
+            and the gateway's endpoint ends the segment as before. Default
+            ``False``. Needs a VAD in the pipeline. Only for ``language`` in
+            ``turn_commit_languages``; an alternative to ``commit_on_vad_stop``.
+            Measured live with Smart Turn v3.2 and Silero (stop 0.2 s), 30 clips
+            per language: the final arrives 0.4-0.7 s after the speaker stops
+            instead of about 1.0 s, but the model called 58-89% of the pauses
+            inside a clip finished, so sentences are split and accuracy drops
+            in all ten languages tested (English CER 1.8% -> 5.5%, Hindi
+            5.4% -> 6.1%, Hinglish 22.8% -> 28.0%). Not recommended.
+        turn_analyzer: The turn model for ``commit_on_turn_end``. ``None`` loads
+            pipecat's ``LocalSmartTurnAnalyzerV3`` (ONNX, CPU, ~40 ms a verdict).
+            It needs its own instance: an analyzer holds one stream's audio.
+        turn_commit_languages: Languages ``commit_on_turn_end`` may run for.
+            ``None`` means Smart Turn v3.2's training languages that the gateway
+            serves (en, hi, bn, mr); any other ``language`` keeps the gateway's
+            endpoint and logs a warning.
         **kwargs: Forwarded to ``STTService.__init__``.
     """
 
@@ -242,8 +277,13 @@ class ShunyalabsSTTService(STTService):
         emit_turn_frames: bool = False,
         commit_on_vad_stop: bool = False,
         commit_delay_s: float = _COMMIT_DELAY_S,
+        commit_on_turn_end: bool = False,
+        turn_analyzer: Optional[BaseTurnAnalyzer] = None,
+        turn_commit_languages: Optional[Iterable[str]] = None,
         **kwargs,
     ) -> None:
+        if commit_on_vad_stop and commit_on_turn_end:
+            raise ValueError("commit_on_vad_stop and commit_on_turn_end are alternatives; pass one.")
         # Initialize settings for pipecat >=0.0.95 (backward-compatible)
         if _STTSettings is not None:
             kwargs.setdefault("settings", _STTSettings(model=None, language=language))
@@ -291,6 +331,28 @@ class ShunyalabsSTTService(STTService):
         # Set when a VAD stop committed the turn; the next raw final is that commit's answer and
         # is marked finalized. Cleared on VAD start.
         self._awaiting_commit_final = False
+        # commit_on_turn_end: the turn model, fed every audio frame labelled with the VAD's state, and
+        # asked at each VAD stop. None when the option is off or the language is not in the list, and
+        # then nothing below touches it -- the service behaves exactly as without the option.
+        self._turn_analyzer = None
+        self._vad_speaking = False
+        if commit_on_turn_end:
+            allowed = (_SMART_TURN_LANGUAGES if turn_commit_languages is None
+                       else frozenset(str(x).strip().lower() for x in turn_commit_languages))
+            if EndOfTurnState is None:
+                logger.warning("ShunyalabsSTTService: commit_on_turn_end needs a pipecat with turn "
+                               "analyzers; it is off.")
+            elif str(language).strip().lower() not in allowed:
+                logger.warning(
+                    "ShunyalabsSTTService: commit_on_turn_end is off for language=%r (enabled for %s). "
+                    "The gateway's endpoint ends each segment, as without the option.",
+                    language, sorted(allowed),
+                )
+            else:
+                if turn_analyzer is None:
+                    from pipecat.audio.turn.smart_turn.local_smart_turn_v3 import LocalSmartTurnAnalyzerV3
+                    turn_analyzer = LocalSmartTurnAnalyzerV3()
+                self._turn_analyzer = turn_analyzer
         # True between the first partial of an utterance and its utterance_end,
         # so the start/stop frames are emitted as matched pairs.
         self._speaking = False
@@ -317,6 +379,8 @@ class ShunyalabsSTTService(STTService):
 
     async def start(self, frame: StartFrame) -> None:
         await super().start(frame)
+        if self._turn_analyzer is not None:
+            self._turn_analyzer.set_sample_rate(self.sample_rate)
         await self._connect()
 
     async def stop(self, frame: EndFrame) -> None:
@@ -326,6 +390,11 @@ class ShunyalabsSTTService(STTService):
     async def cancel(self, frame: CancelFrame) -> None:
         await self._disconnect()
         await super().cancel(frame)
+
+    async def cleanup(self) -> None:
+        await super().cleanup()
+        if self._turn_analyzer is not None:
+            await self._turn_analyzer.cleanup()
 
     def _open_turn(self) -> bool:
         """Claim the turn. True only for the caller that actually opened it."""
@@ -615,6 +684,9 @@ class ShunyalabsSTTService(STTService):
 
     async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
         await super().process_frame(frame, direction)
+        if self._turn_analyzer is not None:
+            await self._track_turn_end(frame)
+            return
         if not self._commit_on_vad_stop:
             return
         if isinstance(frame, VADUserStartedSpeakingFrame):
@@ -622,9 +694,38 @@ class ShunyalabsSTTService(STTService):
             self._awaiting_commit_final = False
         elif isinstance(frame, VADUserStoppedSpeakingFrame):
             await self._cancel_pending_commit()
-            coro = self._delayed_commit()
-            make = getattr(self, "create_task", None)
-            self._commit_task = make(coro) if make else asyncio.ensure_future(coro)
+            self._start_commit_task(self._delayed_commit())
+
+    def _start_commit_task(self, coro) -> None:
+        make = getattr(self, "create_task", None)
+        self._commit_task = make(coro) if make else asyncio.ensure_future(coro)
+
+    async def _track_turn_end(self, frame: Frame) -> None:
+        """commit_on_turn_end: ask the turn model at each VAD stop; a VAD start withdraws the question.
+
+        VAD frames arrive downstream from a VAD in front of this service, or upstream from one in the
+        user aggregator; either way they land here.
+        """
+        if isinstance(frame, VADUserStartedSpeakingFrame):
+            self._vad_speaking = True
+            self._turn_analyzer.update_vad_start_secs(frame.start_secs)
+            await self._cancel_pending_commit()
+            self._awaiting_commit_final = False
+        elif isinstance(frame, VADUserStoppedSpeakingFrame):
+            self._vad_speaking = False
+            await self._cancel_pending_commit()
+            self._start_commit_task(self._commit_if_turn_complete())
+
+    async def _commit_if_turn_complete(self) -> None:
+        """Commit now if the turn model says the speaker has finished; otherwise leave it to the gateway.
+
+        A wrong "finished" at a mid-sentence pause splits the sentence, and the gateway decodes the two
+        pieces apart -- the accuracy cost ``_COMMIT_DELAY_S`` describes. A wrong "not finished" costs
+        nothing but time: the gateway's endpoint ends the segment as it would have anyway.
+        """
+        state, _ = await self._turn_analyzer.analyze_end_of_turn()
+        if state == EndOfTurnState.COMPLETE:
+            await self._commit_on_vad()
 
     async def _cancel_pending_commit(self) -> None:
         task, self._commit_task = self._commit_task, None
@@ -694,6 +795,11 @@ class ShunyalabsSTTService(STTService):
         Transcription results arrive asynchronously via the event
         handlers registered in :meth:`_connect`.
         """
+        if self._turn_analyzer is not None:
+            # The audio the gateway gets, labelled with the VAD's view of it. Its own silence
+            # timeout (append_audio returning COMPLETE) is ignored: by then the gateway has ended
+            # the segment.
+            self._turn_analyzer.append_audio(audio, self._vad_speaking)
         # Proactively re-open a dropped socket before buffering more audio,
         # so a mid-call disconnect (e.g. a transient network blip) recovers
         # transparently instead of silently dropping the rest of the utterance.
