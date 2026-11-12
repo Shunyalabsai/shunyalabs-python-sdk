@@ -2,10 +2,30 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
-## [Unreleased: pipecat-shunyalabsai] - 2026-10-25
+## [pipecat-shunyalabsai 1.1.7] - 2026-11-12
 
-Pipecat plugin only, not released; the version stays 1.1.6. With the new option off the plugin behaves as
-1.1.6 (verified on the live gateway: identical transcripts and timing, 10 of 10 Hindi clips).
+Pipecat plugin only; core stays at 1.1.1, LiveKit at 1.1.4. With `speed` left at 1.0 and the new turn
+option off, the plugin behaves as 1.1.6.
+
+### Changed
+
+- **`speed` now reaches the TTS service.** It was documented as inert on the real-time path. When not 1.0 it
+  is sent in the init message, so it applies for the whole session; the service clamps it like the batch
+  API and keeps the pitch. Checked on the live service: an init with `speed` gets `ready` and audio as
+  before, and a service without speed support ignores the field.
+- **`base_url` is reported instead of silently dropped.** It is not a parameter of
+  `ShunyalabsTTSService` (the stream endpoint is `url`), so it is now taken out of the arguments handed to
+  pipecat and logged as unused. The connection is unchanged: `wss://ttsv2.shunyalabs.ai/v1/realtime`.
+
+### Documentation
+
+- The TTS pre-buffer default is 320 ms (8 frames), not 480 ms as the docstring said, and stays 320 ms.
+  Measured on the TTS host, 18 turns: the service sends 200 ms chunks, a whole sentence in one burst
+  (first chunk 0.21-0.32 s after flush, the rest within 7 ms), so any value up to 200 ms starts on the
+  first chunk and 240-400 ms on the second. Replayed with a 95 ms India-Singapore round trip, TCP slow
+  start after idle and jitter, starting on the first chunk underran whenever a packet of the second chunk
+  was lost (by up to 0.22 s); starting on the second never underran, and costs at most one round trip.
+- `pip install pipecat-shunyalabsai` in the module docstring (it named the old `pipecat-shunyalabs`).
 
 ### Added (off by default; measured, not recommended)
 

@@ -153,11 +153,11 @@ Streaming text-to-speech over a **persistent** WebSocket. The session is opened 
 | `style`         | `str`   | `None`                       | Emotion/delivery style tag. See [Style Tags](#style-tags).    |
 | `language`      | `str`   | `"en"`                       | Output language code (e.g. `"en"`, `"hi"`, `"ta"`).           |
 | `output_format` | `str`   | `"pcm"`                      | Kept for API compatibility. The real-time stream always delivers PCM — see [Audio Output](#audio-output). |
-| `speed`         | `float` | `1.0`                        | Kept for API compatibility. Speed control is a batch-API feature; the stream plays at natural rate. |
+| `speed`         | `float` | `1.0`                        | Speaking rate for the session (above 1.0 is faster). Sent in the init message when not 1.0; the service clamps it like the batch API and keeps the pitch. |
 
 ### Audio Output
 
-The streaming service delivers **raw PCM (24 kHz, 16-bit, mono)** — the format Pipecat's audio pipeline consumes as `TTSAudioRawFrame`. Container formats (WAV, MP3, FLAC, OGG Opus, G.711 mu-law/A-law) and speed control are features of the Shunya Labs **batch** REST API (`POST /v1/audio/speech`) and the SDK's `AsyncBatchTTS`, not the real-time stream.
+The streaming service delivers **raw PCM (24 kHz, 16-bit, mono)** — the format Pipecat's audio pipeline consumes as `TTSAudioRawFrame`. Container formats (WAV, MP3, FLAC, OGG Opus, G.711 mu-law/A-law) are features of the Shunya Labs **batch** REST API (`POST /v1/audio/speech`) and the SDK's `AsyncBatchTTS`, not the real-time stream.
 
 ### Style Tags
 

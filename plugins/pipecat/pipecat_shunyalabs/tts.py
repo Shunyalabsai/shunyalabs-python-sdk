@@ -17,7 +17,7 @@ keeps the socket alive on idle with no application-level keepalive.
 
 Install::
 
-    pip install pipecat-shunyalabs
+    pip install pipecat-shunyalabsai
 
 Usage::
 
@@ -71,16 +71,20 @@ BYTES_PER_SAMPLE = 2
 CHANNELS = 1
 FRAME_MS = 40
 
-# 8 × 40 ms = 320 ms pre-buffer. Still bounds the worst observed server-side chunk
-# gap (~280 ms) so a WebRTC encoder (Daily, LiveKit) does not starve audibly, but
-# trims 160 ms off the first-audio budget versus the old 480 ms default. Note the
-# pre-buffer is NOT the first-sound bottleneck on a persistent connection -- warm
-# turns are ~500 ms regardless (the generator runs ~83x realtime, so the buffer
-# fills near-instantly); only the first turn pays the WebSocket connect.
+# 8 × 40 ms = 320 ms pre-buffer, applied when a session starts and after a barge-in.
+# The service sends 200 ms PCM chunks, a whole sentence in one burst (measured on
+# the ttsv2 box 2026-11-12, 18 turns: first chunk 210-320 ms after flush, every
+# later chunk of the sentence within 7 ms). So the value only picks WHICH chunk
+# playback starts on: anything up to 200 ms starts on the first, 240-400 ms on the
+# second. Replayed with a 95 ms India-Singapore RTT, TCP slow start after idle and
+# jitter, starting on the first chunk underran whenever a packet of the second
+# chunk was lost (by about 0.2 s when recovery takes a retransmit timeout);
+# starting on the second never underran. Going below 240 ms saves at most one
+# round trip and costs that safety margin, so the default stays at 320 ms.
 #
 # Transports without an encoder -- a raw telephony WebSocket, where the carrier
-# holds its own playback buffer -- can safely run lower still: pass
-# `min_buffer_frames=3` (120 ms). Both this and `frame_ms` are constructor args.
+# holds its own playback buffer -- may run lower: pass `min_buffer_frames=3`
+# (120 ms). Both this and `frame_ms` are constructor args.
 MIN_BUFFER_FRAMES = 8
 
 # How long to wait for the server's `cancelled` acknowledgement on barge-in
@@ -102,7 +106,7 @@ class ShunyalabsTTSService(TTSService):
 
     ``min_buffer_frames``
         Frames to accumulate before releasing the first audio of a session.
-        Defaults to 12 (480 ms at the default ``frame_ms``), sized for WebRTC
+        Defaults to 8 (320 ms at the default ``frame_ms``), sized for WebRTC
         transports where an encoder starves audibly. A telephony WebSocket has no
         encoder and the carrier buffers for you, so 3 (120 ms) is usually safe
         there -- but measure, because an underrun is audible too.
@@ -134,12 +138,18 @@ class ShunyalabsTTSService(TTSService):
         language: Language code (default ``"en"``).
         sample_rate: Overridden by whatever the server reports in ``ready``.
         output_format: Accepted for API compatibility; inert on the realtime path.
-        speed: Accepted for API compatibility; inert on the realtime path.
+        speed: Speaking rate for the session; 1.0 is natural pace, above 1.0 is
+            faster. Sent in the init frame when not 1.0, so it applies for the
+            life of the socket (like ``quality``). The service clamps it to the
+            same range as the batch API and keeps the pitch. A service without
+            speed support ignores the field and speaks at natural pace.
         quality: See above. ``None`` takes the server default (medium).
         clause_first: See above. ``None`` takes the server default (off).
         min_buffer_frames: See above.
         frame_ms: Size of each emitted audio frame, in ms (default 40).
-        **kwargs: Forwarded to ``TTSService.__init__``.
+        **kwargs: Forwarded to ``TTSService.__init__``. ``base_url`` is not a
+            parameter of this service: it is ignored with a warning, and the
+            endpoint comes from ``url`` (see above).
     """
 
     def __init__(
@@ -160,6 +170,10 @@ class ShunyalabsTTSService(TTSService):
         frame_ms: int = FRAME_MS,
         **kwargs,
     ) -> None:
+        # `base_url` (the batch REST base, e.g. "https://ttsv2.shunyalabs.ai/v1") is
+        # passed by some callers but means nothing here. Take it out of kwargs so it is
+        # never handed to pipecat, and say so below instead of dropping it silently.
+        base_url = kwargs.pop("base_url", None)
         if _TTSSettings is not None:
             kwargs.setdefault(
                 "settings", _TTSSettings(model=model, voice=voice, language=language)
@@ -175,12 +189,17 @@ class ShunyalabsTTSService(TTSService):
         self._url_arg = url
         self._ws_url = resolve_endpoint(arg=url, server=None,
                                         env_var="SHUNYALABS_TTS_WS_URL", default=_DEFAULT_WS_URL)
+        if base_url is not None:
+            logger.warning(
+                f"ShunyalabsTTSService: base_url={base_url!r} is not used; the stream "
+                f"connects to {self._ws_url}. Pass url= to choose the endpoint."
+            )
         self._model = model
         self._voice = voice
         self._style = style
         self._language = language
         self._output_format = output_format
-        self._speed = speed
+        self._speed = 1.0 if speed is None else float(speed)
         self._quality = quality
         self._clause_first = clause_first
         self._min_buffer_frames = int(min_buffer_frames)
@@ -233,9 +252,11 @@ class ShunyalabsTTSService(TTSService):
         # /v1/realtime handshake: the FIRST frame is a JSON init object; the server replies with
         # {"type":"ready","sample_rate":...}. The session then stays open for many text/flush turns.
         init = {"voice": self._voice, "language": self._language, "model": self._model}
-        # Both are session-level on the service, so they go in the init frame and
+        # These are session-level on the service, so they go in the init frame and
         # apply for the life of the socket. Omitted when unset so the server's own
-        # defaults apply.
+        # defaults apply. A server that does not know a field ignores it.
+        if self._speed != 1.0:
+            init["speed"] = self._speed
         if self._quality is not None:
             init["quality"] = self._quality
         if self._clause_first is not None:
@@ -407,7 +428,7 @@ class ShunyalabsTTSService(TTSService):
         # So the next turn re-pays the pre-buffer but NOT the reconnect. That is
         # the expensive half: a TCP+TLS dial plus a fresh `ready` handshake to a
         # remote endpoint, all of it while the caller waits. Pair this with a
-        # lower `min_buffer_frames` on transports that do not need 480 ms and
+        # lower `min_buffer_frames` on transports that do not need 320 ms and
         # barge-in recovery costs almost nothing.
         self._transport_lock.release()
 

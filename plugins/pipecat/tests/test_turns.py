@@ -17,6 +17,14 @@ from pipecat.turns.user_stop.external_user_turn_stop_strategy import (
 
 from pipecat_shunyalabs import ShunyaUserTurnStrategies
 
+# These drive upstream's polling loop (`_task_handler`) directly. Newer pipecat
+# (seen on 1.16) replaced that loop with a timer started by the transcript, so the
+# harness cannot run there; ShunyaUserTurnStrategies still only sets `timeout`.
+_needs_poll = pytest.mark.skipif(
+    not hasattr(ExternalUserTurnStopStrategy, "_task_handler"),
+    reason="this pipecat has no polling ExternalUserTurnStopStrategy._task_handler",
+)
+
 
 def _tf(text: str) -> TranscriptionFrame:
     return TranscriptionFrame(text=text, user_id="u", timestamp="")
@@ -61,6 +69,7 @@ def _stop_strategy(strategies):
 
 
 @pytest.mark.asyncio
+@_needs_poll
 async def test_a_whole_final_reaches_the_model_sooner_than_upstream():
     """The reason this helper exists.
 
@@ -79,6 +88,7 @@ async def test_a_whole_final_reaches_the_model_sooner_than_upstream():
 
 
 @pytest.mark.asyncio
+@_needs_poll
 @pytest.mark.parametrize("gap", [0.02, 0.05, 0.1])
 async def test_a_final_split_within_the_window_is_still_merged(gap):
     """Why the fix is the timeout's VALUE and not the handler's logic.
