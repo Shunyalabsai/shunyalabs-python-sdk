@@ -2,6 +2,39 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [pipecat-shunyalabsai 1.1.8] - 2026-11-12
+
+Pipecat plugin only; core stays at 1.1.1, LiveKit at 1.1.4. 1.1.7 was not published, so 1.1.8 carries it.
+
+### Fixed
+
+- **No more silence between sentences.** pipecat calls `run_tts` once per sentence and waits for it to
+  return, and `run_tts` used to return only after the sentence had been paced out, so the next sentence
+  was sent only then and every sentence boundary waited for its first audio plus the round trip. Once a
+  sentence has fully arrived, the last `lookahead_ms` (new, default 800) is now released at once and
+  `run_tts` returns, so the next sentence is synthesised while this one plays and continues from where
+  it ends. Pacing is unchanged otherwise; downstream holds at most `lookahead_ms`, which pipecat clears
+  on an interruption, and a barge-in still sends `cancel`, which drops queued and in-flight audio on the
+  service. Replayed through the plugin code with the measured service timings (26 sentences in 8
+  replies) and a 95 ms India-Singapore round trip: silence at each sentence boundary 274 ms median (312
+  max) -> 0 ms; with jitter and 5% chunk loss 275 ms (599 max) -> 0 ms.
+- **The pre-buffer is paid again whenever playback has run dry**, not only at the start of a session
+  and after a barge-in. A new reply used to start on the first 200 ms chunk, which a lost packet in the
+  second chunk outran: with a 300 ms retransmit in the second chunk of every sentence, 125 audible gaps
+  (worst 116 ms) in 1.1.7, none in 1.1.8. First audio of a reply is unchanged with normal delivery
+  (318 -> 318 ms median, 5% chunk loss 324 -> 328 ms); it waits for the second chunk instead of stuttering
+  when that chunk is late (+95 ms or +300 ms in those loss cases).
+
+### Changed
+
+- Docstrings: asrv2prod's default `endpoint_silence_ms` is 700 ms since 2026-11-12 (was 1000 ms), about
+  0.29 s faster per turn with WER flat on FLEURS Hindi and English.
+
+### Note on `speed`
+
+- The service started honouring `speed` on 2026-11-12, but it currently cuts the last word of each
+  sentence (a fix is in progress on the service). Leave `speed` at 1.0 until that fix is live.
+
 ## [pipecat-shunyalabsai 1.1.7] - 2026-11-12
 
 Pipecat plugin only; core stays at 1.1.1, LiveKit at 1.1.4. With `speed` left at 1.0 and the new turn

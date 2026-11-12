@@ -190,12 +190,13 @@ class ShunyalabsSTTService(STTService):
     is entirely the transport VAD's job -- exactly as in 1.0.x.
 
     **Latency.** ``endpoint_silence_ms`` is the dominant control: it is pure
-    wall-clock delay after the speaker stops before a final can be emitted. At the
-    gateway default (1000 ms on asrv2prod since 2026-10-23) the transcript reaches
-    the pipeline about 1 s after the speaker stops (measured: English 1.01 s, Hindi
-    0.99 s, Hinglish 1.25 s median over 30 clips each). ``commit_on_vad_stop`` can
-    end the turn from the transport VAD instead; measured against that default it
-    saves under 0.1 s and costs Hinglish accuracy, so it is off unless asked for.
+    wall-clock delay after the speaker stops before a final can be emitted. The
+    gateway default is 700 ms on asrv2prod since 2026-11-12 (1000 ms before): the
+    transcript reaches the pipeline about 0.29 s sooner than at 1000 ms, where it
+    took English 1.01 s, Hindi 0.99 s and Hinglish 1.25 s (median, 30 clips each);
+    WER was flat on FLEURS Hindi and English. ``commit_on_vad_stop`` can end the
+    turn from the transport VAD instead; measured against the 1000 ms default it
+    saved under 0.1 s and cost Hinglish accuracy, so it is off unless asked for.
     ``commit_on_turn_end`` ends it when a turn model says the speaker finished:
     about 0.6 s faster, but the model calls many mid-sentence pauses finished, so it
     splits sentences and costs accuracy in every language measured -- also off.
@@ -212,7 +213,7 @@ class ShunyalabsSTTService(STTService):
         min_send_bytes: Bytes to accumulate before forwarding. Default is 100 ms
             at 16 kHz; lower it proportionally for 8 kHz telephony.
         endpoint_silence_ms: Silence before the gateway emits a final. ``None``
-            takes the server default -- 1000 ms on asrv2prod since 2026-10-23 (the
+            takes the server default -- 700 ms on asrv2prod since 2026-11-12 (the
             ``ready`` echo reports it). Server clamps to 200-5000. Below about
             300 ms a mid-sentence pause splits the sentence and costs accuracy.
         decode_every_ms: Interim-result cadence. ``None`` takes the server
@@ -232,7 +233,7 @@ class ShunyalabsSTTService(STTService):
         commit_on_vad_stop: After ``VADUserStoppedSpeakingFrame`` and
             ``commit_delay_s`` of continued silence, send the buffered audio and
             :meth:`commit`, and mark the answering final ``finalized``. Default
-            ``False``: at the gateway's 1000 ms endpoint it measured under 0.1 s
+            ``False``: at the gateway's former 1000 ms endpoint it measured under 0.1 s
             faster on English and Hindi and less accurate on Hinglish. Needs a
             VAD in the pipeline; without one nothing changes.
         commit_delay_s: Silence after the VAD stop before committing (default
@@ -247,7 +248,7 @@ class ShunyalabsSTTService(STTService):
             ``turn_commit_languages``; an alternative to ``commit_on_vad_stop``.
             Measured live with Smart Turn v3.2 and Silero (stop 0.2 s), 30 clips
             per language: the final arrives 0.4-0.7 s after the speaker stops
-            instead of about 1.0 s, but the model called 58-89% of the pauses
+            instead of about 1.0 s (gateway default then 1000 ms), but the model called 58-89% of the pauses
             inside a clip finished, so sentences are split and accuracy drops
             in all ten languages tested (English CER 1.8% -> 5.5%, Hindi
             5.4% -> 6.1%, Hinglish 22.8% -> 28.0%). Not recommended.

@@ -11,7 +11,9 @@ Per turn, each sentence is sent as ``{"type": "text", ...}`` followed by
 latency); the service answers with ``{"type": "speaking"}``, binary PCM
 (24 kHz, 16-bit mono), and ``{"type": "done"}``. Audio is re-chunked into
 fixed 40 ms frames emitted at wall-clock rate to prevent WebRTC encoder
-starvation. On barge-in the socket is reset so no stale audio leaks into the
+starvation. The last ``lookahead_ms`` of each sentence is released early, so the
+next sentence is synthesised while this one plays and follows it without a gap.
+On barge-in the session sends ``cancel`` so no stale audio leaks into the
 next turn, and the real-time service answers WebSocket pings so ``ping_interval``
 keeps the socket alive on idle with no application-level keepalive.
 
@@ -71,7 +73,8 @@ BYTES_PER_SAMPLE = 2
 CHANNELS = 1
 FRAME_MS = 40
 
-# 8 × 40 ms = 320 ms pre-buffer, applied when a session starts and after a barge-in.
+# 8 × 40 ms = 320 ms pre-buffer, applied whenever playback starts from silence: a
+# new session, after a barge-in, and (since 1.1.8) whenever playback has run dry.
 # The service sends 200 ms PCM chunks, a whole sentence in one burst (measured on
 # the ttsv2 box 2026-11-12, 18 turns: first chunk 210-320 ms after flush, every
 # later chunk of the sentence within 7 ms). So the value only picks WHICH chunk
@@ -86,6 +89,18 @@ FRAME_MS = 40
 # holds its own playback buffer -- may run lower: pass `min_buffer_frames=3`
 # (120 ms). Both this and `frame_ms` are constructor args.
 MIN_BUFFER_FRAMES = 8
+
+# How much of the end of each utterance is released ahead of real time once the
+# whole utterance has arrived. run_tts then returns early, pipecat hands over the
+# next sentence, and the service synthesises it while this one is still playing.
+# It must cover the next sentence's first audio: 0.21-0.31 s at the service
+# (measured 2026-11-12, 26 sentences) plus the network round trip (~0.1 s from
+# India). Replayed through this code with a 95 ms round trip, jitter and 5%
+# chunk loss, the silence between sentences was 0 ms at 800 (max 0), 600 (max
+# 49) and 400 (max 249), and 29 ms at 300 (max 349); 800 leaves room for a
+# slower service. Downstream holds at most this much audio, and pipecat clears
+# it on an interruption.
+LOOKAHEAD_MS = 800
 
 # How long to wait for the server's `cancelled` acknowledgement on barge-in
 # before giving up and dropping the socket instead.
@@ -105,8 +120,9 @@ class ShunyalabsTTSService(TTSService):
     **Latency knobs, in the order they are worth reaching for:**
 
     ``min_buffer_frames``
-        Frames to accumulate before releasing the first audio of a session.
-        Defaults to 8 (320 ms at the default ``frame_ms``), sized for WebRTC
+        Frames to accumulate before audio starts from silence: the first turn,
+        after a barge-in, and whenever playback has run dry. Defaults to 8
+        (320 ms at the default ``frame_ms``), sized for WebRTC
         transports where an encoder starves audibly. A telephony WebSocket has no
         encoder and the carrier buffers for you, so 3 (120 ms) is usually safe
         there -- but measure, because an underrun is audible too.
@@ -147,10 +163,19 @@ class ShunyalabsTTSService(TTSService):
         clause_first: See above. ``None`` takes the server default (off).
         min_buffer_frames: See above.
         frame_ms: Size of each emitted audio frame, in ms (default 40).
+        lookahead_ms: How much of the end of each utterance is released ahead
+            of real time once it has fully arrived (default 800). ``run_tts``
+            then returns, pipecat hands over the next sentence, and its audio
+            is ready when this one ends. It must cover the next sentence's
+            first audio plus the network round trip; 0 turns it off (each
+            sentence then waits for the previous one to finish playing).
         **kwargs: Forwarded to ``TTSService.__init__``. ``base_url`` is not a
             parameter of this service: it is ignored with a warning, and the
             endpoint comes from ``url`` (see above).
     """
+
+    # Bumped on barge-in and close; a class default so it exists however the instance was made.
+    _pace_epoch: int = 0
 
     def __init__(
         self,
@@ -168,6 +193,7 @@ class ShunyalabsTTSService(TTSService):
         clause_first: Optional[bool] = None,
         min_buffer_frames: int = MIN_BUFFER_FRAMES,
         frame_ms: int = FRAME_MS,
+        lookahead_ms: int = LOOKAHEAD_MS,
         **kwargs,
     ) -> None:
         # `base_url` (the batch REST base, e.g. "https://ttsv2.shunyalabs.ai/v1") is
@@ -204,6 +230,7 @@ class ShunyalabsTTSService(TTSService):
         self._clause_first = clause_first
         self._min_buffer_frames = int(min_buffer_frames)
         self._frame_ms = int(frame_ms)
+        self._lookahead_ms = max(0, int(lookahead_ms))
 
         # ASR/TTS v2 services accept only a minted short-lived JWT, never the raw
         # key. TokenAuth mints and refreshes it transparently.
@@ -212,8 +239,11 @@ class ShunyalabsTTSService(TTSService):
         self._transport_lock = asyncio.Lock()
         self._session_ready = False   # init frame sent + "ready" received for the current transport
 
-        # Pacing state persists across run_tts so consecutive sentences don't
-        # each re-pay the pre-buffer delay; reset in start/stop/cancel.
+        # Pacing state persists across run_tts so a sentence that arrives while the
+        # previous one is still playing continues it without a gap. `_pace_next_time`
+        # is when everything released so far finishes playing; the pre-buffer is paid
+        # again only once playback has run dry. Reset on barge-in and on close, which
+        # also bump `_pace_epoch` so an utterance in progress stops speaking.
         self._pace_buffer: bytearray = bytearray()
         self._pace_next_time: Optional[float] = None
         self._pace_started: bool = False
@@ -293,6 +323,7 @@ class ShunyalabsTTSService(TTSService):
         self._pace_buffer = bytearray()
         self._pace_next_time = None
         self._pace_started = False
+        self._pace_epoch += 1
 
     def _build_audio_frame(
         self, audio: bytes, context_id: Optional[str]
@@ -386,6 +417,7 @@ class ShunyalabsTTSService(TTSService):
         self._pace_buffer = bytearray()
         self._pace_next_time = None
         self._pace_started = False
+        self._pace_epoch += 1
 
         transport = self._transport
         if transport is None or not self._session_ready:
@@ -460,61 +492,125 @@ class ShunyalabsTTSService(TTSService):
                 await self._close_transport()
                 transport = await _send_turn()
 
+            # A barge-in bumps the epoch (see discard_current_turn): from then on nothing more of
+            # this utterance is spoken.
+            epoch = self._pace_epoch
+            lookahead_s = self._lookahead_ms / 1000
+            frame_s = self._frame_ms / 1000
             completed = False
-            while not completed:
-                msg = await transport.receive_message()
 
+            def _take(msg) -> bool:
+                """Buffer audio / note the end of the utterance. True once `done` has arrived."""
                 if isinstance(msg, (bytes, bytearray)):
-                    # Raw PCM for a spoken piece. Pace it out at ~realtime so a server burst does not
-                    # overrun the transport; the pre-buffer is paid once and persists across turns.
-                    frame_bytes = self._frame_bytes()
                     self._pace_buffer.extend(msg)
-                    if not self._pace_started:
-                        if len(self._pace_buffer) < frame_bytes * self._min_buffer_frames:
-                            continue
-                        self._pace_started = True
-                        self._pace_next_time = time.monotonic()
-                    while len(self._pace_buffer) >= frame_bytes:
-                        now = time.monotonic()
-                        if self._pace_next_time < now:
-                            self._pace_next_time = now
-                        else:
-                            await asyncio.sleep(self._pace_next_time - now)
-                        # That sleep yields, and an interruption arriving during
-                        # it runs _handle_interruption on another task, which
-                        # sets _pace_next_time back to None (see the note there).
-                        # Resuming here would then do `None += frame_ms`, which
-                        # raises inside the frame processor and kills TTS for the
-                        # REST OF THE CALL -- non-fatal, so every later turn just
-                        # goes unanswered. Seen on the meera-voice eval suite
-                        # 2026-09-21: the agent fell silent mid-booking and four
-                        # assertions failed for a reason unrelated to them.
-                        #
-                        # The buffer was cleared by that same reset, so there is
-                        # nothing left of this utterance to pace: stop.
-                        if self._pace_next_time is None or not self._pace_started:
-                            break
-                        chunk = bytes(self._pace_buffer[:frame_bytes])
-                        del self._pace_buffer[:frame_bytes]
-                        yield self._build_audio_frame(chunk, context_id)
-                        self._pace_next_time += self._frame_ms / 1000
-                    continue
-
+                    return False
                 if not isinstance(msg, dict):
-                    continue
+                    return False
                 kind = msg.get("type")
                 if kind == "speaking":
                     reported_rate = msg.get("sample_rate")
                     if reported_rate and reported_rate != self.sample_rate:
                         self._sample_rate = reported_rate
                 elif kind == "done":
-                    # Emit any sub-frame remainder so no audio is dropped at the utterance tail.
-                    if self._pace_buffer:
-                        yield self._build_audio_frame(bytes(self._pace_buffer), context_id)
-                        self._pace_buffer = bytearray()
-                    completed = True
+                    return True
                 elif kind == "error":
                     raise SynthesisError(msg.get("error"))
+                return False
+
+            while self._pace_epoch == epoch:
+                frame_bytes = self._frame_bytes()
+                buf = self._pace_buffer
+                now = time.monotonic()
+                if self._pace_started and self._pace_next_time is None:
+                    self._pace_next_time = now
+
+                # Start once the pre-buffer is in. This runs at the start of a session, after a
+                # barge-in, and whenever playback has run dry (below), so a turn that starts from
+                # silence always has the pre-buffer's margin against a late second chunk. An
+                # utterance shorter than the pre-buffer starts once it is complete.
+                if not self._pace_started and (
+                    len(buf) >= frame_bytes * self._min_buffer_frames or (completed and buf)
+                ):
+                    self._pace_started = True
+                    self._pace_next_time = now
+
+                if self._pace_started and buf and (completed or len(buf) >= frame_bytes):
+                    # When this utterance's audio would finish playing if paced out from here.
+                    end_time = self._pace_next_time + len(buf) / (frame_bytes / frame_s)
+                    if completed and (now >= end_time - lookahead_s or len(buf) < frame_bytes):
+                        # The whole utterance is in and its end is within the lookahead (or only
+                        # a part-frame is left): release the rest now and return, so pipecat
+                        # hands over the next sentence and
+                        # the service synthesises it while this one is still playing. The pacing
+                        # clock moves to the end of this audio, and the next utterance continues
+                        # from there without a gap. Downstream holds at most `lookahead_ms`.
+                        while buf and self._pace_epoch == epoch:
+                            chunk = bytes(buf[:frame_bytes])
+                            del buf[:frame_bytes]
+                            yield self._build_audio_frame(chunk, context_id)
+                        if self._pace_epoch == epoch:
+                            self._pace_next_time = end_time
+                        break
+
+                    if len(buf) >= frame_bytes:
+                        due = self._pace_next_time
+                        if completed:
+                            due = min(due, end_time - lookahead_s)
+                        if due > now:
+                            # Not due yet. Keep reading meanwhile, so `done` is seen as soon
+                            # as it arrives rather than after this audio has been paced out.
+                            # Waits are at most one frame, so a barge-in is noticed as fast
+                            # as before (the next sentence can be up to the lookahead away).
+                            wait = min(due - now, frame_s)
+                            if completed:
+                                await asyncio.sleep(wait)
+                            else:
+                                try:
+                                    msg = await asyncio.wait_for(
+                                        transport.receive_message(), timeout=wait
+                                    )
+                                except asyncio.TimeoutError:
+                                    pass
+                                else:
+                                    completed = _take(msg)
+                            continue
+                        # Due. Only when a whole frame late does the clock restart from now rather than
+                        # bursting: resetting on any lateness added each sleep's ~1 ms overshoot to every
+                        # frame, so audio went out every ~41 ms instead of 40 (measured from a laptop).
+                        if self._pace_next_time < now - frame_s:
+                            self._pace_next_time = now
+                        chunk = bytes(buf[:frame_bytes])
+                        del buf[:frame_bytes]
+                        yield self._build_audio_frame(chunk, context_id)
+                        # The yield hands control to pipecat; a barge-in there resets the clock.
+                        if self._pace_next_time is not None:
+                            self._pace_next_time += frame_s
+                        continue
+
+                if completed:
+                    # Nothing buffered and nothing more coming.
+                    break
+
+                # Need more audio. (websockets' recv is safe to cancel: a timed-out wait
+                # loses no message.)
+                had_frame = len(buf) >= frame_bytes
+                try:
+                    msg = await asyncio.wait_for(transport.receive_message(), timeout=frame_s)
+                except asyncio.TimeoutError:
+                    continue
+                if self._pace_epoch != epoch:
+                    break
+                completed = _take(msg)
+                # Ran dry: everything already released has finished playing and there was no
+                # whole frame left to send. Pay the pre-buffer again before resuming, instead
+                # of restarting on a single 200 ms chunk that a lost packet can outrun.
+                if (
+                    isinstance(msg, (bytes, bytearray))
+                    and self._pace_started
+                    and not had_frame
+                    and (self._pace_next_time is None or time.monotonic() > self._pace_next_time)
+                ):
+                    self._pace_started = False
 
         yield (
             TTSStoppedFrame(context_id=context_id)
