@@ -6,7 +6,7 @@ Python SDK for transport and protocol handling.
 
 Install::
 
-    pip install livekit-plugins-shunyalabs
+    pip install livekit-plugins-shunyalabsai
 
 Usage::
 
@@ -54,7 +54,14 @@ from shunyalabs.asr._batch import AsyncBatchASR
 from shunyalabs.asr._models import StreamingConfig, StreamingMessageType, TranscriptionConfig
 from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
 
-from ._version import __version__
+from ._version import _CLIENT_ID, __version__
+
+
+class _PluginStreamingConfig(StreamingConfig):
+    """The core's config plus ``client``, so the init message says which plugin version is calling."""
+
+    client: Optional[str] = None
+
 
 _DEFAULT_API_URL = "https://asrv2prod.shunyalabs.ai"
 _DEFAULT_WS_URL = "wss://asrv2prod.shunyalabs.ai/v1/realtime"
@@ -67,21 +74,24 @@ class STT(stt.STT):
 
     Args:
         api_key: Shunyalabs API key. Falls back to ``SHUNYALABS_API_KEY`` env var.
-        language: BCP-47 language tag or ``"auto"`` for auto-detection.
+        language: Language code (e.g. ``"en"``, ``"hi"``), ``"hinglish"`` for
+            Hindi-English mixed speech, or ``"auto"`` for auto-detection.
         api_url: REST endpoint base URL.
         ws_url: WebSocket streaming endpoint URL.
         endpoint_silence_ms: Silence before the gateway emits a final, and so the
             dominant control over how long a speaker waits after finishing.
-            ``None`` takes the server default (1000 ms on asrv2prod since 2026-10-23); clamped to 200-5000.
+            ``None`` takes the server default (700 ms on asrv2prod since 2026-11-12); clamped to 200-5000.
         decode_every_ms: Interim-result cadence. ``None`` takes the server
             default (1280 ms on asrv2prod); clamped to 320-5000. Raising it lowers per-stream
             GPU cost at the price of coarser interim transcripts.
         vad: ``"silero"`` to opt into model-based endpointing. Worth it on noisy
             telephony audio, where energy thresholding can fail to register
             silence at all and natural endpointing then never fires.
-        codeswitch: Opt into code-switch refinement, delivered as an additional
-            final transcript once the segment has been re-rendered in the correct
-            scripts.
+        codeswitch: With ``"hinglish"`` (or ``"hi"``/``"en"``), the gateway picks the
+            language per final, so Hindi comes back in Devanagari and English in Latin
+            script, with no ``final_refined``. With other languages, a ``final_refined``
+            with corrected scripts follows each final and is delivered as its own
+            final transcript.
         model: Explicit model/tier. ``None`` lets the gateway route on language.
     """
 
@@ -246,7 +256,8 @@ class STTStream(RecognizeStream):
             ),
         )
 
-        config = StreamingConfig(
+        config = _PluginStreamingConfig(
+            client=_CLIENT_ID,
             language=self._language,
             sample_rate=16000,
             dtype="int16",
@@ -274,9 +285,15 @@ class STTStream(RecognizeStream):
                 )
 
         try:
-            # Register event handlers that push to LiveKit's event channel
+            # The handlers are coroutines on purpose. The core runs a plain function
+            # handler in the default thread pool (run_in_executor), one job per message,
+            # so a partial and the final 1 ms behind it could reach the event channel in
+            # either order, and send_nowait() was called off the event loop, which the
+            # channel does not allow. A coroutine handler is awaited on the loop, and
+            # since none of them awaits anything, each runs to completion in the order
+            # the gateway sent its message (pipecat's ordered dispatch, for LiveKit).
             @conn.on(StreamingMessageType.PARTIAL)
-            def on_partial(msg):
+            async def on_partial(msg):
                 if msg.text:
                     self._event_ch.send_nowait(
                         SpeechEvent(
@@ -311,7 +328,7 @@ class STTStream(RecognizeStream):
             # Keying off a final that actually carries text is immune to both.
 
             @conn.on(StreamingMessageType.FINAL_REFINED)
-            def on_final_refined(msg):
+            async def on_final_refined(msg):
                 # Code-switch refinement of a segment already delivered as FINAL,
                 # re-rendered in the correct scripts. Delivered as its own
                 # transcript rather than dropped.
@@ -328,7 +345,7 @@ class STTStream(RecognizeStream):
                     )
 
             @conn.on(StreamingMessageType.FINAL)
-            def on_final(msg):
+            async def on_final(msg):
                 if not msg.text:
                     # An empty final is the gateway re-endpointing on silence.
                     # It carries no transcript and is not a turn boundary, so it

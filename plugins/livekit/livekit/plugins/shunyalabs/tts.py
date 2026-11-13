@@ -12,7 +12,7 @@ a laptop: ~0.37 s of every segment went to connect + ready before any text).
 
 Install::
 
-    pip install livekit-plugins-shunyalabs
+    pip install livekit-plugins-shunyalabsai
 
 Usage::
 
@@ -56,7 +56,7 @@ from shunyalabs.tts._batch import AsyncBatchTTS
 from shunyalabs.tts._models import TTSConfig
 from shunyalabs.tts._streaming import AsyncStreamingTTS
 
-from ._version import __version__
+from ._version import _CLIENT_ID, __version__
 
 logger = logging.getLogger(__name__)
 
@@ -103,7 +103,10 @@ class TTS(tts.TTS):
         output_format: Audio format for the batch path (``"pcm"``, ``"wav"``,
             ``"mp3"``, ``"ogg_opus"``, ``"flac"``). The real-time stream is
             always PCM.
-        speed: Speaking speed multiplier (0.25-4.0), applied on the batch path.
+        speed: Speaking speed multiplier; 1.0 is natural pace. Applied on both paths:
+            on the real-time stream it is sent in the session's init message when not
+            1.0, so it holds for the life of the pooled session. The service clamps it
+            to 0.25-4.0 and keeps the pitch; a service without speed support ignores it.
     """
 
     def __init__(
@@ -169,10 +172,16 @@ class TTS(tts.TTS):
             sdk_component="tts",
         )
         try:
-            await transport.connect()
-            init: dict = {"voice": self._voice, "language": self._language}
+            # The User-Agent and the init's "client" name the plugin version to the service.
+            await transport.connect(ws_headers={"User-Agent": _CLIENT_ID})
+            init: dict = {"voice": self._voice, "language": self._language, "client": _CLIENT_ID}
             if self._model:
                 init["model"] = self._model
+            # Session-level on the service: sent only when not natural pace, so the
+            # server's own default applies otherwise. (Until 1.1.5 speed reached only
+            # the batch path, and every real-time stream spoke at 1.0.)
+            if self._speed is not None and float(self._speed) != 1.0:
+                init["speed"] = float(self._speed)
             await transport.send_message(init)
             ready = await asyncio.wait_for(transport.receive_message(), timeout=timeout)
         except BaseException:

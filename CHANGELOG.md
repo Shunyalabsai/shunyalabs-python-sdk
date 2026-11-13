@@ -2,6 +2,40 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [livekit-plugins-shunyalabsai 1.1.5] - 2026-11-13
+
+LiveKit plugin only; core stays at 1.1.1, Pipecat at 1.1.9. Brings over the Pipecat changes since 1.1.0
+that apply to LiveKit. With `speed` left at 1.0 the plugin behaves as 1.1.4.
+
+### Changed
+
+- **`speed` now reaches the real-time stream.** It was sent only on the batch path, so every streamed
+  reply spoke at 1.0. It is now in the session's init message when not 1.0. Measured on the live service
+  (Hinglish, voice Meera, a four-sentence reply): 18.3 s at 1.0 and 16.7 s at 1.1 (9% shorter), the last
+  word of every sentence intact when transcribed; 1.1.4 gave 18.4 s at both.
+- **STT events reach LiveKit on the event loop, in the order the service sent them.** The handlers were
+  plain functions, which the core runs in a thread pool, one job per message, so a partial and the final
+  right behind it could arrive in either order and the event channel was written from a worker thread.
+  They are now coroutines. Live, 8 caller clips (Hindi, English, mixed, short answers) with
+  `codeswitch=True`: the same transcripts as 1.1.4 on all 8, final within 20 ms of 1.1.4's timing.
+
+### Added
+
+- **The plugin names itself to the services.** The STT and TTS init messages carry
+  `"client": "livekit-plugins-shunyalabsai/<version>"` (from the package version), and the TTS socket sends
+  the same string as its User-Agent. Both services' session logs show it.
+
+### Documentation
+
+- The ASR default `endpoint_silence_ms` is 700 ms (since 2026-11-12); `language="hinglish"` and what
+  `codeswitch` does with it; `pip install livekit-plugins-shunyalabsai` in the module docstrings.
+
+### Not brought over
+
+- Pipecat's pacing loop, pre-buffer, look-ahead, frame queue, turn strategies and turn-commit options.
+  LiveKit plays the audio itself, already sends text as it arrives and keeps its socket on barge-in
+  (1.1.4), and has no turn latch. Measured live: no gap between sentences, barge-in reuses the socket.
+
 ## [pipecat-shunyalabsai 1.1.9] - 2026-11-13
 
 Pipecat plugin only; core stays at 1.1.1, LiveKit at 1.1.4. No change in behaviour.

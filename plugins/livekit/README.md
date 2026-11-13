@@ -54,9 +54,11 @@ session = AgentSession(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `api_key` | `str` | `None` | API key. Falls back to `SHUNYALABS_API_KEY` env var. |
-| `language` | `str` | `"auto"` | BCP-47 language code or `"auto"` for auto-detection. |
+| `language` | `str` | `"auto"` | Language code (`"en"`, `"hi"`, ...), `"hinglish"` for Hindi-English mixed speech, or `"auto"` for auto-detection. |
 | `api_url` | `str` | `https://asrv2prod.shunyalabs.ai` | REST batch endpoint base URL. |
 | `ws_url` | `str` | `wss://asrv2prod.shunyalabs.ai/v1/realtime` | WebSocket streaming endpoint URL. |
+| `endpoint_silence_ms` | `int` | `None` | Silence before the service ends a segment. `None` takes the server default, 700 ms. |
+| `codeswitch` | `bool` | `None` | With `"hinglish"` (or `"hi"`/`"en"`), the language is picked per final: Hindi in Devanagari, English in Latin script. |
 
 ### Capabilities
 
@@ -68,7 +70,7 @@ session = AgentSession(
 
 ### Streaming STT
 
-Real-time transcription over WebSocket. The SDK opens a connection to the real-time ASR service and sends a JSON init message (`{language, sample_rate}`); once the service replies `{"type": "ready"}`, audio frames from LiveKit are streamed as binary data and `{"type": "partial"}` / `{"type": "final"}` messages are surfaced as `SpeechEvent`s. A bare `"end"` marker finalizes the stream. The SDK handles this handshake for you.
+Real-time transcription over WebSocket. The SDK opens a connection to the real-time ASR service and sends a JSON init message (`{language, sample_rate, client, ...}`); once the service replies `{"type": "ready"}`, audio frames from LiveKit are streamed as binary data and `{"type": "partial"}` / `{"type": "final"}` messages are surfaced as `SpeechEvent`s. A bare `"end"` marker finalizes the stream. The SDK handles this handshake for you.
 
 ```python
 from livekit.agents import AgentSession
@@ -89,8 +91,10 @@ def on_speech(ev):
 | Shunyalabs Event | LiveKit SpeechEventType |
 |------------------|------------------------|
 | `PARTIAL` | `INTERIM_TRANSCRIPT` |
-| `FINAL_SEGMENT` | `FINAL_TRANSCRIPT` + `END_OF_SPEECH` |
-| `FINAL` | `FINAL_TRANSCRIPT` + `RECOGNITION_USAGE` |
+| `FINAL` (with text) | `FINAL_TRANSCRIPT` + `RECOGNITION_USAGE` + `END_OF_SPEECH` |
+| `FINAL_REFINED` | `FINAL_TRANSCRIPT` |
+
+Events reach LiveKit in the order the service sent them.
 
 ### Batch STT
 
@@ -123,7 +127,7 @@ print(event.alternatives[0].text)
 | `language` | `str` | `"en"` | Language code for transliteration. |
 | `sample_rate` | `int` | `24000` | Output audio sample rate in Hz. The gateway emits 24 kHz PCM on both the streaming and batch paths; override only if you resample the audio yourself. |
 | `output_format` | `str` | `"pcm"` | Audio format for the **batch** (`synthesize`) path (`"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`). The real-time stream is always PCM. |
-| `speed` | `float` | `1.0` | Speaking speed multiplier (0.25–4.0). |
+| `speed` | `float` | `1.0` | Speaking speed multiplier (0.25 to 4.0, pitch kept). Applies to streaming and batch. |
 
 ### Style Tags
 
@@ -153,7 +157,7 @@ tts = shunyalabs.TTS(voice="Rajesh", style="<Happy>")
 
 ### Streaming TTS
 
-Token-by-token streaming. The SDK opens a connection to the real-time TTS service and sends a JSON init message (`{voice, language}`); once the service replies `{"type": "ready"}`, collected text is sent as `{"type": "text", ...}` followed by `{"type": "flush"}`, and the service returns `{"type": "speaking"}`, binary PCM audio, and `{"type": "done"}`. The SDK handles this handshake for you.
+Token-by-token streaming. The SDK opens a connection to the real-time TTS service and sends a JSON init message (`{voice, language, model, client}`, plus `speed` when not 1.0); once the service replies `{"type": "ready"}`, text is sent as `{"type": "text", ...}` as soon as it arrives and each segment ends with `{"type": "flush"}`. The service speaks each sentence as soon as it is complete and returns binary PCM audio and `{"type": "done"}`. The session stays open for the next turn, and an interruption sends `{"type": "cancel"}` instead of closing it.
 
 ```python
 from livekit.agents import AgentSession
@@ -231,6 +235,13 @@ tts_english = shunyalabs.TTS(
     style="<Conversational>",
 )
 ```
+
+---
+
+## Version tag
+
+Both init messages carry `"client": "livekit-plugins-shunyalabsai/<version>"`, and the TTS socket sends the
+same string as its User-Agent, so Shunya Labs support can see which plugin version a session used.
 
 ---
 
