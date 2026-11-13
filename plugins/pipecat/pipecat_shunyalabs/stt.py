@@ -64,6 +64,14 @@ from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
 from shunyalabs.asr._streaming import ASRStreamingConnection, AsyncStreamingASR
 
+from . import _CLIENT_ID
+
+
+class _PluginStreamingConfig(StreamingConfig):
+    """The core's config plus ``client``, so the init frame says which plugin version is calling."""
+
+    client: Optional[str] = None
+
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WS_URL = "wss://asrv2prod.shunyalabs.ai/v1/realtime"
@@ -430,7 +438,8 @@ class ShunyalabsSTTService(STTService):
                 ),
             )
 
-            config = StreamingConfig(
+            config = _PluginStreamingConfig(
+                client=_CLIENT_ID,
                 language=self._language,
                 sample_rate=self._sample_rate,
                 dtype="int16",

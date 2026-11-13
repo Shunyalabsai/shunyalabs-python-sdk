@@ -1,10 +1,14 @@
 """Shunyalabs STT and TTS services for Pipecat pipelines."""
 
-from .stt import ShunyalabsSTTService
-from .tts import ShunyalabsTTSService
-from .turns import ShunyaUserTurnStrategies
+# Set before the submodules are imported: they read it to tag their init frames.
+__version__ = "1.1.9"
+# Sent as "client" in each init frame (and as the TTS socket's User-Agent) so the
+# services can log which plugin version a customer runs.
+_CLIENT_ID = f"pipecat-shunyalabsai/{__version__}"
 
-__version__ = "1.1.8"
+from .stt import ShunyalabsSTTService  # noqa: E402
+from .tts import ShunyalabsTTSService  # noqa: E402
+from .turns import ShunyaUserTurnStrategies  # noqa: E402
 __all__ = [
     "ShunyalabsSTTService",
     "ShunyalabsTTSService",

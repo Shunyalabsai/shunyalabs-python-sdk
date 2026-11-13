@@ -2,6 +2,18 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [pipecat-shunyalabsai 1.1.9] - 2026-11-13
+
+Pipecat plugin only; core stays at 1.1.1, LiveKit at 1.1.4. No change in behaviour.
+
+### Added
+
+- **The plugin names itself to the services.** The STT and TTS init frames carry
+  `"client": "pipecat-shunyalabsai/<version>"` (read from the package version), and the TTS socket sends
+  the same string as its User-Agent, so the services can log which plugin version a customer runs.
+  Services that do not read the field ignore it (checked on the live TTS service: `ready` and audio as
+  before).
+
 ## [pipecat-shunyalabsai 1.1.8] - 2026-11-12
 
 Pipecat plugin only; core stays at 1.1.1, LiveKit at 1.1.4. 1.1.7 was not published, so 1.1.8 carries it.

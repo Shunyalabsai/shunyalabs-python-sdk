@@ -65,6 +65,8 @@ from shunyalabs._core._exceptions import SynthesisError
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs._core._ws_transport import WsTransport
 
+from . import _CLIENT_ID
+
 
 _DEFAULT_WS_URL = "wss://ttsv2.shunyalabs.ai/v1/realtime"
 _CHUNK_PAYLOAD_TIMEOUT_S = 5.0
@@ -270,7 +272,7 @@ class ShunyalabsTTSService(TTSService):
             ),
             sdk_component="tts",
         )
-        await transport.connect()
+        await transport.connect(ws_headers={"User-Agent": _CLIENT_ID})
         return transport
 
     async def _ensure_transport(self) -> WsTransport:
@@ -281,7 +283,8 @@ class ShunyalabsTTSService(TTSService):
         self._transport = await self._open_transport()
         # /v1/realtime handshake: the FIRST frame is a JSON init object; the server replies with
         # {"type":"ready","sample_rate":...}. The session then stays open for many text/flush turns.
-        init = {"voice": self._voice, "language": self._language, "model": self._model}
+        init = {"voice": self._voice, "language": self._language, "model": self._model,
+                "client": _CLIENT_ID}
         # These are session-level on the service, so they go in the init frame and
         # apply for the life of the socket. Omitted when unset so the server's own
         # defaults apply. A server that does not know a field ignores it.
