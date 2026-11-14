@@ -1,7 +1,7 @@
 """Shunyalabs STT and TTS services for Pipecat pipelines."""
 
 # Set before the submodules are imported: they read it to tag their init frames.
-__version__ = "1.1.9"
+__version__ = "1.1.10"
 # Sent as "client" in each init frame (and as the TTS socket's User-Agent) so the
 # services can log which plugin version a customer runs.
 _CLIENT_ID = f"pipecat-shunyalabsai/{__version__}"

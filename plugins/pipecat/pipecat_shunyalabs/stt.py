@@ -59,6 +59,20 @@ try:
 except ImportError:  # pipecat without turn analyzers; commit_on_turn_end then cannot be enabled
     BaseTurnAnalyzer = EndOfTurnState = None
 
+# Turn proposals (pipecat 1.16+): a service that detects turns proposes them and the user turn
+# strategies decide, emitting the turn frames AND the interruption. Emitting UserStarted/Stopped
+# directly instead puts the service on the "adopt" path, where pipecat leaves the interruption to
+# the service -- which this one never sent, so the bot could not be interrupted (measured live,
+# 14 Nov: 0 interruptions in every emit_turn_frames session). Older pipecat: the direct frames.
+try:
+    from pipecat.frames.frames import ProposedUserStartedSpeakingFrame, ProposedUserStoppedSpeakingFrame
+except ImportError:
+    ProposedUserStartedSpeakingFrame = ProposedUserStoppedSpeakingFrame = None
+
+# pipecat's turn-stop strategies end the wait for a transcript as soon as one arrives marked
+# `finalized` ("nothing more is coming"). Older pipecat has no such field.
+_HAS_FINALIZED = "finalized" in getattr(TranscriptionFrame, "__dataclass_fields__", {})
+
 from shunyalabs._core._auth import TokenAuth, resolve_endpoint
 from shunyalabs._core._models import WsConnectionConfig
 from shunyalabs.asr._models import StreamingConfig, StreamingMessageType
@@ -88,6 +102,15 @@ _MIN_SEND_BYTES = 3200
 # (commit_on_vad_stop). pipecat's turn-stop strategy waits this long for a transcript that is
 # not marked finalized; its own default is a 1.0 s guess.
 _TTFS_P99_S = 0.6
+
+# The same safety net on the default path: how long pipecat waits after the VAD stop for a transcript
+# before closing the turn with whatever text it has. Its own default is a 1.0 s guess, and the
+# gateway's final lands about 1.0-1.1 s after speech ends at the 700 ms endpoint -- so long turns
+# were closed a few milliseconds before their last final and split in two (measured live, 14 Nov:
+# 1-2 of 11 long Hinglish turns, the bot answering only the tail). Finals that end an utterance are
+# now marked `finalized`, which closes the wait the moment they arrive, so this only bounds the wait
+# when no such final comes.
+_TTFS_P99_DEFAULT_S = 1.5
 
 # Continued silence after the VAD stop before committing. pipecat's VAD stops after 0.2 s, which a
 # mid-sentence pause easily reaches -- and finalising there splits the sentence into segments the
@@ -161,11 +184,20 @@ class ShunyalabsSTTService(STTService):
     Transcription events are pushed back as ``TranscriptionFrame`` /
     ``InterimTranscriptionFrame``.
 
-    **Turn-taking (opt-in).** With ``emit_turn_frames=True`` the gateway's
-    ``utterance_end`` becomes ``UserStoppedSpeakingFrame`` and the first partial
-    of an utterance becomes ``UserStartedSpeakingFrame``, so turn boundaries come
-    from the ASR's own endpointing instead of a second VAD guessing at the same
-    thing from the same audio.
+    **Finalized transcripts.** A final that ends an utterance goes out with
+    ``finalized=True``, so pipecat's turn-stop strategy stops waiting for text the
+    moment it arrives. A final cut at the gateway's segment length cap is held
+    until the rest of the utterance arrives or the gateway's ``utterance_end``
+    says it ended. The service also tells pipecat the transcript latency it should
+    wait for at most (``ttfs_p99_latency``, 1.5 s; pass your own to override).
+
+    **Turn-taking (opt-in).** With ``emit_turn_frames=True`` the first partial of
+    an utterance proposes a turn start and the gateway's ``utterance_end`` proposes
+    its end (``ProposedUserStartedSpeakingFrame`` / ``ProposedUserStoppedSpeakingFrame``
+    on pipecat 1.16+, where the user turn strategies then announce the turn and
+    interrupt the bot; ``UserStartedSpeakingFrame`` / ``UserStoppedSpeakingFrame``
+    on older pipecat), so turn boundaries come from the ASR's own endpointing
+    instead of a second VAD guessing at the same thing from the same audio.
 
     **It must be paired with pipecat's external turn strategies**, because only
     those consume these frames::
@@ -234,8 +266,8 @@ class ShunyalabsSTTService(STTService):
             ``final_refined``). With other languages, a ``final_refined`` with
             corrected scripts follows each ``final``.
         model: Explicit model/tier. ``None`` lets the gateway route on language.
-        emit_turn_frames: Emit ``UserStartedSpeakingFrame`` /
-            ``UserStoppedSpeakingFrame`` from the gateway's own endpointing.
+        emit_turn_frames: Propose turn starts and ends from the gateway's own
+            endpointing (see above).
             Default ``False``; requires ``ExternalUserTurnStrategies`` on the
             user aggregator. See the note above.
         commit_on_vad_stop: After ``VADUserStoppedSpeakingFrame`` and
@@ -298,8 +330,8 @@ class ShunyalabsSTTService(STTService):
             kwargs.setdefault("settings", _STTSettings(model=None, language=language))
         # A committed final is measured, not guessed: tell the turn-stop strategy so it does not
         # wait its 1.0 s default for one. Only pipecat versions that know the knob get it.
-        if commit_on_vad_stop and "ttfs_p99_latency" in inspect.signature(STTService.__init__).parameters:
-            kwargs.setdefault("ttfs_p99_latency", _TTFS_P99_S)
+        if "ttfs_p99_latency" in inspect.signature(STTService.__init__).parameters:
+            kwargs.setdefault("ttfs_p99_latency", _TTFS_P99_S if commit_on_vad_stop else _TTFS_P99_DEFAULT_S)
         super().__init__(sample_rate=sample_rate, **kwargs)
         self._api_key = api_key or os.environ.get("SHUNYALABS_API_KEY", "")
         if not self._api_key:
@@ -381,6 +413,14 @@ class ShunyalabsSTTService(STTService):
         # disconnect that runs before any connect cannot AttributeError.
         self._dispatch_q = None
         self._dispatch_task = None
+        # Finals cut at the gateway's segment length cap (end_of_utterance false), held until the
+        # rest of the utterance arrives (the next final) or the gateway says it ended
+        # (utterance_end), so the frame that is marked finalized is the one that really ends it.
+        self._held: list = []
+        # The gateway sends final_refined only on plans that re-render a final's scripts. The raw
+        # final it refines must then not be marked finalized (more text is coming), so the first
+        # refinement seen on a connection turns the marking off for that connection.
+        self._refine_seen = False
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -420,6 +460,33 @@ class ShunyalabsSTTService(STTService):
                 return False
             self._speaking = False
             return True
+
+    def _queue(self, coro) -> None:
+        """Queue a frame push on the ordered dispatcher (called on the event loop)."""
+        if self._dispatch_q is None:
+            coro.close()                # not connected: nothing will consume it
+            return
+        self._dispatch_q.put_nowait(coro)
+
+    def _flush_held(self, finalized: bool) -> None:
+        """Deliver finals held back at the segment cap; mark the last one finalized if asked."""
+        held, self._held = self._held, []
+        for i, frame in enumerate(held):
+            self._queue(self._push_transcription(
+                frame, refined=False, finalized=finalized and i == len(held) - 1))
+
+    def _turn_started(self):
+        """The turn-start signal: a proposal where pipecat has them, so it also interrupts the bot."""
+        if ProposedUserStartedSpeakingFrame is not None:
+            return self.broadcast_frame(ProposedUserStartedSpeakingFrame)
+        return self.push_frame(UserStartedSpeakingFrame())
+
+    def _turn_stopped(self):
+        """The turn-stop signal. The proposal is a control frame, so it stays behind the transcripts
+        queued before it; the old UserStoppedSpeakingFrame is a system frame and overtook them."""
+        if ProposedUserStoppedSpeakingFrame is not None:
+            return self.broadcast_frame(ProposedUserStoppedSpeakingFrame)
+        return self.push_frame(UserStoppedSpeakingFrame())
 
     async def _connect(self) -> None:
         """Open a streaming ASR connection via the SDK."""
@@ -509,22 +576,25 @@ class ShunyalabsSTTService(STTService):
 
             self._dispatch_task = loop.create_task(_dispatch_worker())
 
-            def _schedule(coro):
-                # put_nowait is thread-safe enough only via the loop, because the
-                # gateway's callbacks do not run on it.
-                loop.call_soon_threadsafe(self._dispatch_q.put_nowait, coro)
+            # The handlers below are coroutines on purpose. The SDK runs a plain-function
+            # handler in its thread pool, one job per message, so a `final` and the
+            # `utterance_end` sent right behind it could reach the queue in either order
+            # (measured live, 14 Nov: stop, start, stop, then the transcript -- the tail of
+            # a sentence became a turn of its own). A coroutine handler runs on this loop,
+            # one task per message in arrival order, and none of them awaits before
+            # queueing, so the queue sees exactly the gateway's order.
+            _schedule = self._queue
 
             @self._conn.on(StreamingMessageType.PARTIAL)
-            def on_partial(msg):
+            async def on_partial(msg):
                 if not msg.text:
                     return
                 # First partial of an utterance is the earliest speech evidence the
                 # gateway gives us, so it doubles as the turn-start signal. It is
-                # only as prompt as `decode_every_ms` (640 ms by default), which is
-                # fine for turn-taking but too slow to drive barge-in -- keep a
-                # transport VAD for that.
+                # only as prompt as `decode_every_ms` (1280 ms by default), which is
+                # fine for turn-taking but too slow to drive barge-in on its own.
                 if self._emit_turn_frames and self._open_turn():
-                    _schedule(self.push_frame(UserStartedSpeakingFrame()))
+                    _schedule(self._turn_started())
                 _schedule(self.push_frame(
                     InterimTranscriptionFrame(
                         text=msg.text,
@@ -540,19 +610,25 @@ class ShunyalabsSTTService(STTService):
             # event is FINAL, below.
 
             @self._conn.on(StreamingMessageType.UTTERANCE_END)
-            def on_utterance_end(msg):
-                # The speaker stopped. Only fires after a final whose
-                # end_of_utterance is true, so it is absent when the gateway cut a
-                # segment at its maximum length -- which is what makes it usable as
-                # a turn boundary where a bare `final` is not.
+            async def on_utterance_end(msg):
+                # The speaker stopped. Sent after every real endpoint, never after a
+                # segment cut at the length cap mid-speech -- which is what makes it a
+                # turn boundary where a bare `final` is not. It is also the ONLY end
+                # signal when the cap landed at the end of speech: that final says
+                # end_of_utterance=false and no further final comes (measured live).
+                # A final held for that reason is complete now: deliver it finalized.
+                self._flush_held(finalized=True)
                 if self._emit_turn_frames and self._close_turn():
-                    _schedule(self.push_frame(UserStoppedSpeakingFrame()))
+                    _schedule(self._turn_stopped())
 
             @self._conn.on(StreamingMessageType.FINAL)
-            def on_final(msg):
+            async def on_final(msg):
                 if not msg.text:
                     # An empty final is the gateway re-endpointing on continued
-                    # silence. Not speech, not a turn.
+                    # silence (only sent with suppress_empty_finals off). Not speech,
+                    # not a turn -- but it does end an utterance a held final was in.
+                    if getattr(msg, "end_of_utterance", None) is not False and self._held:
+                        self._flush_held(finalized=True)
                     return
 
                 # A final carrying text is definitive evidence of speech, and it
@@ -571,32 +647,42 @@ class ShunyalabsSTTService(STTService):
                 # read made -- but taken atomically.
                 opened = self._emit_turn_frames and self._open_turn()
                 if opened:
-                    _schedule(self.push_frame(UserStartedSpeakingFrame()))
+                    _schedule(self._turn_started())
 
-                _schedule(self._push_transcription(
-                    TranscriptionFrame(
-                        text=msg.text,
-                        user_id="",
-                        timestamp=str(time.time()),
-                        language=_to_language(msg.language),
-                    ),
-                    refined=False,
-                ))
+                frame = TranscriptionFrame(
+                    text=msg.text,
+                    user_id="",
+                    timestamp=str(time.time()),
+                    language=_to_language(msg.language),
+                )
+                if getattr(msg, "end_of_utterance", None) is False:
+                    # Cut at the segment length cap: the speaker may still be talking.
+                    # Held, not pushed, until the next final (then it goes first,
+                    # unmarked) or utterance_end (then it is the end, marked
+                    # finalized). Pushed now, a turn-stop strategy could take it as
+                    # the whole turn.
+                    self._held.append(frame)
+                    return
+
+                # This final ends the utterance: it goes out marked finalized, so
+                # pipecat's turn-stop strategy stops waiting for text the moment it
+                # arrives instead of running out a fixed timer first.
+                self._flush_held(finalized=False)
+                _schedule(self._push_transcription(frame, refined=False, finalized=True))
 
                 if opened and self._close_turn():
-                    # Nothing preceded this final, so it IS the entire turn.
-                    # Close it here rather than waiting for utterance_end: the
-                    # two are not guaranteed to arrive in a fixed order, and a
-                    # turn left open blocks every later one. The compare-and-set
-                    # means that if utterance_end got there first, it closed the
-                    # turn and this does not emit a second stop frame.
-                    _schedule(self.push_frame(UserStoppedSpeakingFrame()))
+                    # Nothing preceded this final, so it IS the entire turn. Close
+                    # it here; the utterance_end behind it finds the turn closed and
+                    # does not emit a second stop.
+                    _schedule(self._turn_stopped())
 
             @self._conn.on(StreamingMessageType.FINAL_REFINED)
-            def on_final_refined(msg):
+            async def on_final_refined(msg):
                 # Code-switch refinement of a segment already delivered as FINAL. Raw finals
                 # are never held back waiting for this, so it arrives afterwards and is pushed
-                # as its own transcription rather than being dropped.
+                # as its own transcription rather than being dropped. Its existence means raw
+                # finals on this connection are not the last word: stop marking them.
+                self._refine_seen = True
                 if msg.text:
                     _schedule(self._push_transcription(
                         TranscriptionFrame(
@@ -609,7 +695,7 @@ class ShunyalabsSTTService(STTService):
                     ))
 
             @self._conn.on(StreamingMessageType.ERROR)
-            def on_error(msg):
+            async def on_error(msg):
                 logger.error("ShunyalabsSTTService gateway error: %s", msg.message)
 
             logger.info("ShunyalabsSTTService connected (session=%s)", self._conn.session_id)
@@ -642,6 +728,8 @@ class ShunyalabsSTTService(STTService):
         # final of the last turn is often the newest thing on the queue, and
         # cancelling here would drop the caller's closing words.
         if self._dispatch_q is not None and self._dispatch_task is not None:
+            # A final still held at the segment cap is the caller's last words: deliver it.
+            self._flush_held(finalized=True)
             try:
                 self._dispatch_q.put_nowait(None)      # shutdown sentinel
                 await asyncio.wait_for(self._dispatch_task, timeout=2.0)
@@ -652,6 +740,8 @@ class ShunyalabsSTTService(STTService):
                 logger.exception("ShunyalabsSTTService: dispatcher shutdown failed")
         self._dispatch_q = None
         self._dispatch_task = None
+        self._held = []
+        self._refine_seen = False
         self._audio_buffer.clear()
         # Clear the speaking latch. A reconnect mid-utterance would otherwise
         # leave it stuck True, and every subsequent turn-start frame would be
@@ -659,7 +749,7 @@ class ShunyalabsSTTService(STTService):
         if self._close_turn():
             if self._emit_turn_frames:
                 try:
-                    await self.push_frame(UserStoppedSpeakingFrame())
+                    await self._turn_stopped()
                 except Exception:
                     pass
         logger.info("ShunyalabsSTTService disconnected")
@@ -774,8 +864,14 @@ class ShunyalabsSTTService(STTService):
         self._awaiting_commit_final = True
         await self.commit()
 
-    async def _push_transcription(self, frame: TranscriptionFrame, refined: bool) -> None:
-        """Push a final from the ordered dispatch queue, marking a commit's answer finalized.
+    async def _push_transcription(self, frame: TranscriptionFrame, refined: bool,
+                                  finalized: bool = False) -> None:
+        """Push a final from the ordered dispatch queue, marking it finalized when it ends the utterance.
+
+        ``finalized`` comes from the gateway: the final ended the utterance (end_of_utterance), or an
+        utterance_end closed one held at the segment cap. It is not set on connections that have
+        shown a final_refined, since the raw final is then not the last text for its segment.
+        A commit's answer is marked as well, through pipecat's own finalize handshake:
 
         Runs on the queue, so the mark lands on the frame that answers the commit and never on an
         earlier final still waiting to be delivered. The answer is the first raw final after the
@@ -783,6 +879,8 @@ class ShunyalabsSTTService(STTService):
         ``ready`` echo does not say whether this one does, so waiting for it would hold every
         turn on the plans without it. A refinement that does arrive is pushed as before.
         """
+        if finalized and _HAS_FINALIZED and not refined and not self._refine_seen:
+            frame.finalized = True
         if self._awaiting_commit_final and not refined:
             self._awaiting_commit_final = False
             if hasattr(self, "confirm_finalize"):

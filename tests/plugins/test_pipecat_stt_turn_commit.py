@@ -11,6 +11,7 @@ Skipped unless pipecat is installed:
 """
 
 import asyncio
+import inspect
 import logging
 from types import SimpleNamespace
 
@@ -60,9 +61,15 @@ class _FakeConn:
         if self._answer:
             self.final(self._answer)
 
-    def final(self, text):
-        """The gateway's final, from its callback (as the real receive loop delivers it)."""
-        self.handlers[MT.FINAL](SimpleNamespace(text=text, language="en"))
+    def final(self, text, eou=True):
+        """The gateway's final, delivered as the SDK's receive loop does: a coroutine handler is
+        scheduled as a task on the running loop, a plain one is called."""
+        msg = SimpleNamespace(text=text, language="en", end_of_utterance=eou)
+        fn = self.handlers[MT.FINAL]
+        if inspect.iscoroutinefunction(fn):
+            asyncio.get_running_loop().create_task(fn(msg))
+        else:
+            fn(msg)
 
     async def end(self):
         self.sent.append(("end", None))
@@ -176,13 +183,14 @@ class TestCommitOnTurnEnd:
     @pytest.mark.asyncio
     async def test_incomplete_leaves_the_segment_to_the_gateway(self, monkeypatch):
         conn = _FakeConn()
-        # The gateway's own endpoint ends the segment a little later; that final is not marked.
+        # The gateway's own endpoint ends the segment a little later. Since 1.1.10 that final is
+        # marked too: it ends the utterance (end_of_utterance), so nothing more is coming for it.
         turn = _FakeTurn(EndOfTurnState.INCOMPLETE, then=lambda: conn.final("I want to"))
         svc = _service(monkeypatch, conn, commit_on_turn_end=True, turn_analyzer=turn)
         out = await _run(svc, _turn())
         assert turn.asked == 1
         assert ("commit", None) not in conn.sent
-        assert [(f.text, f.finalized) for f in out] == [("I want to", False)]
+        assert [(f.text, f.finalized) for f in out] == [("I want to", True)]
 
     @pytest.mark.asyncio
     async def test_a_vad_start_withdraws_a_verdict_still_being_computed(self, monkeypatch):

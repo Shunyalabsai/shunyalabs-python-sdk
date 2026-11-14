@@ -2,6 +2,36 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [pipecat-shunyalabsai 1.1.10] - 2026-11-14
+
+Pipecat plugin only. Found by a real pipecat 1.16 pipeline test from a laptop against the live services
+(fake microphone and speaker, Silero VAD, scripted LLM), 1.1.6 and 1.1.9 in both turn setups.
+
+### Fixed
+
+- **Default setup (transport VAD + pipecat's turn strategies): long turns could be split.** pipecat waits a
+  fixed time after the VAD stop for a transcript not marked `finalized` (its own guess, 1.0 s), and the
+  gateway's final lands about 1.0-1.1 s after speech ends at the 700 ms endpoint. Measured: 1 of 11 (1.1.6)
+  and 2 of 11 (1.1.9) long Hinglish turns closed 18 ms to 0.13 s before their last final; the bot answered
+  only that tail. A final that ends an utterance is now marked `finalized`, which ends the wait when it
+  arrives, and the service declares `ttfs_p99_latency=1.5` for the cases where none comes.
+- **A final cut at the segment length cap** (end_of_utterance false) is held until the rest of the utterance
+  arrives or `utterance_end` says it ended, so it is never taken as a whole turn.
+- **Message order.** The SDK ran the plugin's plain-function callbacks in its thread pool, one job per
+  message, so `utterance_end` could be handled before the `final` sent ahead of it (measured: stop, start,
+  stop, then the transcript). The callbacks are now coroutines, run on the loop in arrival order (as in
+  livekit-plugins-shunyalabsai 1.1.5).
+- **`emit_turn_frames=True`: the bot could not be interrupted** (0 interruptions in every such session,
+  with or without a VAD), and the stop frame could overtake the transcript. On pipecat 1.16+ the service
+  now proposes turns (`ProposedUserStartedSpeakingFrame` / `ProposedUserStoppedSpeakingFrame`); the user
+  turn strategies announce them and broadcast the interruption, and the stop proposal stays behind the
+  transcripts queued before it. Older pipecat gets the direct frames as before.
+
+### Not changed
+
+- TTS. 1.1.9's sentence-gap fix measured again: 1.1.6 left 0.14-0.29 s of silence between sentences (81
+  gaps, 26 s, over 13 real customer replies), 1.1.9 none.
+
 ## [livekit-plugins-shunyalabsai 1.1.7] - 2026-11-14
 
 LiveKit plugin only. Found by running a real LiveKit `AgentSession` with `turn_detection="stt"` against the live

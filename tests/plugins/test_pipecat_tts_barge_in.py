@@ -211,11 +211,11 @@ class TestShortUtterancesOpenATurn:
         src = inspect.getsource(m)
         # The final handler must arm the latch, not just read it.
         final_src = src.split("StreamingMessageType.FINAL)")[1].split("@self._conn.on")[0]
-        assert "UserStartedSpeakingFrame()" in final_src, \
+        assert "_turn_started()" in final_src, \
             "a final with text must be able to open a turn"
-        assert "UserStoppedSpeakingFrame()" in final_src, \
+        assert "_turn_stopped()" in final_src, \
             "a final with no preceding partial must also close the turn"
-        assert "had_partials" in final_src, \
+        assert "opened and self._close_turn()" in final_src, \
             "the close must be conditional on nothing having preceded it"
 
     def test_empty_finals_still_do_nothing(self):
