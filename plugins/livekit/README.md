@@ -92,11 +92,13 @@ def on_speech(ev):
 |------------------|------------------------|
 | First `PARTIAL` of a turn | `START_OF_SPEECH` + `INTERIM_TRANSCRIPT` |
 | Later `PARTIAL` | `INTERIM_TRANSCRIPT` |
-| `FINAL` (with text) | `START_OF_SPEECH` (if no partial opened the turn) + `FINAL_TRANSCRIPT` + `RECOGNITION_USAGE` + `END_OF_SPEECH` |
-| Empty `FINAL` while a turn is open | `END_OF_SPEECH` (the service dropped a noise final) |
+| `FINAL` (with text) | `START_OF_SPEECH` (if no partial opened the turn) + `FINAL_TRANSCRIPT` + `RECOGNITION_USAGE` + `END_OF_SPEECH` (when it ends the utterance) |
+| `UTTERANCE_END` while a turn is open | `END_OF_SPEECH` (a length-capped final at the end of speech, or a noise final the service dropped) |
 | `FINAL_REFINED` | `FINAL_TRANSCRIPT` |
 
 Events reach LiveKit in the order the service sent them. Each turn gets exactly one `START_OF_SPEECH` and one `END_OF_SPEECH`. LiveKit reads those two only with `turn_detection="stt"`; with VAD turn detection they are ignored.
+
+With `turn_detection="stt"` and no VAD, LiveKit's `aec_warmup_duration` (default 3 s) replaces the caller's audio with silence for the STT during the first seconds of every agent reply, so words spoken over the agent in that window are not transcribed and cannot interrupt it. Lower it if your audio path has no echo to cancel.
 
 ### Batch STT
 
@@ -131,7 +133,7 @@ print(event.alternatives[0].text)
 | `output_format` | `str` | `"pcm"` | Audio format for the **batch** (`synthesize`) path (`"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`). The real-time stream is always PCM. |
 | `speed` | `float` | `1.0` | Speaking speed multiplier (0.25 to 4.0, pitch kept). Applies to streaming and batch. |
 | `quality` | `str` | `None` | `"low"`, `"medium"` or `"high"`; `None` takes the service default (medium). Applies to streaming and batch. `"low"` gives the fastest first audio but can drop a word in short clips, so avoid it for numbers, dates and codes. |
-| `clause_first` | `bool` | `None` | Streaming only. `True` starts speaking at the first clause instead of the first full sentence: earlier first audio on long replies, a possible audible join. `None` takes the service default (off). |
+| `clause_first` | `bool` | `None` | Streaming only. `True` starts speaking at the first clause instead of the first full sentence while the LLM is still sending text, when that opening clause has at least 12 words (measured: first audio 2.5 s to 1.3 s). A possible audible join. `None` takes the service default (off). |
 
 ### Style Tags
 

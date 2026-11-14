@@ -1,10 +1,11 @@
-"""LiveKit 1.1.6: STT turn events, and TTS quality / clause_first.
+"""LiveKit 1.1.6/1.1.7: STT turn events, and TTS quality / clause_first.
 
 - STT sends exactly one START_OF_SPEECH and one END_OF_SPEECH per turn. The turn
   opens on the first partial with text, or on a final with text when no partial
-  came first, and closes on the final that ends the utterance. An empty final
-  closes a turn that partials opened (the service dropped a noise final) and
-  does nothing otherwise.
+  came first. It closes on a final with text that ends the utterance, or else on
+  the next utterance_end. The stub sends what asrv2prod sends: empty finals are
+  suppressed (its default), so a length-capped final at the end of speech, a
+  dropped unsure final and silence all leave only utterance_end messages.
 - TTS ``quality`` and ``clause_first`` reach the real-time init when set and are
   left to the service otherwise; ``quality`` also reaches the batch request.
 
@@ -128,14 +129,29 @@ class TestSttTurns:
         assert kinds(ev) == [T.START_OF_SPEECH, (T.FINAL_TRANSCRIPT, "Yes."),
                              T.RECOGNITION_USAGE, T.END_OF_SPEECH]
 
-    def test_empty_final_closes_a_turn_opened_by_partials(self):
-        # The service dropped a short unsure final (noise) and sent an empty one;
-        # later empty finals (silence re-endpointing) add nothing.
-        ev = run(_events([partial("Pop"), final(""), UTT_END, final(""), UTT_END, final(""), UTT_END]))
+    def test_dropped_final_closes_on_utterance_end(self):
+        # The service dropped a short unsure final (noise): the empty final is
+        # suppressed, so only utterance_end follows, then more on the quiet line.
+        ev = run(_events([partial("Pop"), UTT_END, UTT_END, UTT_END]))
+        assert kinds(ev) == [T.START_OF_SPEECH, (T.INTERIM_TRANSCRIPT, "Pop"), T.END_OF_SPEECH]
+
+    def test_length_capped_final_at_end_of_speech_closes_on_utterance_end(self):
+        # Measured live on 1.1.6: the segment cap landed at the end of a 4.5 s clip,
+        # so its final said end_of_utterance=false and only utterance_end followed.
+        # The turn stayed open until the caller spoke again, and the two merged.
+        ev = run(_events([partial("mera order"), final("mera order deliver nahi hua", eou=False),
+                          UTT_END, UTT_END, UTT_END]))
+        assert kinds(ev) == [T.START_OF_SPEECH, (T.INTERIM_TRANSCRIPT, "mera order"),
+                             (T.FINAL_TRANSCRIPT, "mera order deliver nahi hua"), T.RECOGNITION_USAGE,
+                             T.END_OF_SPEECH]
+
+    def test_empty_final_closes_too_when_not_suppressed(self):
+        # suppress_empty_finals=false: the empty final arrives and closes the turn.
+        ev = run(_events([partial("Pop"), final(""), UTT_END, final(""), UTT_END]))
         assert kinds(ev) == [T.START_OF_SPEECH, (T.INTERIM_TRANSCRIPT, "Pop"), T.END_OF_SPEECH]
 
     def test_silence_produces_no_events(self):
-        ev = run(_events([final(""), UTT_END, final(""), UTT_END]))
+        ev = run(_events([UTT_END, UTT_END, UTT_END, final(""), UTT_END]))
         assert ev == []
 
     def test_two_turns_each_get_one_start_and_one_end(self):

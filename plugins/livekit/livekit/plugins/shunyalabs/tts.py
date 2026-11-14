@@ -121,10 +121,13 @@ class TTS(tts.TTS):
             so keep it away from numbers, dates and reference codes. Any other value is
             refused by the service.
         clause_first: Real-time stream only. ``True`` releases the first piece of a
-            reply at a clause boundary instead of waiting for the first full sentence:
-            earlier first audio on long replies, no change on short ones, and the split
-            sentence is spoken in two pieces, which can be audible at the join.
-            ``None`` (default) takes the service default, off.
+            reply at a clause boundary instead of waiting for the first full sentence,
+            while the text is still arriving from the LLM. The service does this only
+            when the opening clause has at least 12 words; otherwise it waits for the
+            sentence as usual. Measured live (Meera, text at ~20 words/s, an 18-word
+            opening clause): first audio 2.5 s -> 1.3 s. The split sentence is spoken
+            in two pieces, which can be audible at the join. ``None`` (default) takes
+            the service default, off.
     """
 
     def __init__(

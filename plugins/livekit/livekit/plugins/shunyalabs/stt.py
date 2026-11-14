@@ -327,30 +327,30 @@ class STTStream(RecognizeStream):
                     )
 
             # NOTE: FINAL_SEGMENT is not handled. /v1/realtime never sends it --
-            # it belonged to the older gateway. END_OF_SPEECH used to be emitted
-            # only from inside that handler, which meant this plugin produced no
-            # end-of-speech event at all on the current gateway. It now comes from
-            # UTTERANCE_END below, which is the real signal.
-
-            # END_OF_SPEECH is emitted from the FINAL handler below, not from
-            # utterance_end, for two measured reasons:
+            # it belonged to the older gateway.
             #
-            #  1. Ordering between `final` and `utterance_end` is NOT guaranteed
-            #     -- they are observed in both orders, 1 ms apart. Driving
-            #     END_OF_SPEECH off utterance_end therefore emitted it BEFORE the
-            #     transcript, which inverts LiveKit's convention and lets an agent
-            #     act before it has the text.
-            #  2. The gateway re-endpoints on continued silence: an EMPTY final
-            #     with end_of_utterance=true plus an utterance_end, roughly every
-            #     800 ms for as long as the line stays quiet (measured: 4 of them
-            #     in 6 s of trailing silence). A caller who simply stops talking
-            #     would generate a stream of end-of-speech events.
+            # How a turn ends (one END_OF_SPEECH per START_OF_SPEECH):
             #
-            # Keying off a final that actually carries text is immune to both.
-            # The one exception is a turn already opened by partials whose final
-            # comes back empty: the gateway drops a short unsure final (a cough, a
-            # click) and sends an empty one in its place. That empty final closes
-            # the open turn; with no turn open, an empty final still does nothing.
+            #  - A final WITH text and end_of_utterance closes it, right after its
+            #    transcript, so an agent never acts before it has the text.
+            #  - Otherwise `utterance_end` closes it. The service sends that after
+            #    every real endpoint, but NOT always after a final with text:
+            #      * a final cut at the segment length cap (end_of_utterance false)
+            #        that happens to land at the end of speech is followed only by
+            #        utterance_end messages (measured live: a 4.5 s Hinglish clip,
+            #        then utterance_end every ~0.7 s and no further final);
+            #      * empty finals are suppressed by default (suppress_empty_finals),
+            #        so a dropped unsure final (a cough, a click) or a filtered one
+            #        leaves only the utterance_end.
+            #    1.1.6 ignored utterance_end, so such a turn stayed open until the
+            #    caller's NEXT utterance and the two were merged (1.1.5 sent no
+            #    START_OF_SPEECH, and LiveKit committed the turn from the transcript).
+            #  - utterance_end also repeats every ~0.7 s on a quiet line; with no
+            #    turn open it does nothing, so silence produces no events.
+            #
+            # Ordering: the service sends `final` before its `utterance_end` on one
+            # socket, and the handlers run on the loop in arrival order (1.1.5), so
+            # utterance_end can no longer overtake the transcript.
 
             @conn.on(StreamingMessageType.FINAL_REFINED)
             async def on_final_refined(msg):
@@ -372,10 +372,9 @@ class STTStream(RecognizeStream):
             @conn.on(StreamingMessageType.FINAL)
             async def on_final(msg):
                 if not msg.text:
-                    # An empty final is the gateway re-endpointing on silence.
-                    # It carries no transcript, so it produces no transcript or usage
-                    # (usage would otherwise tick once per ~800 ms of quiet). It only
-                    # closes a turn that partials opened and that produced no text.
+                    # Only reaches us with suppress_empty_finals off. No transcript
+                    # and no usage (usage would tick once per ~0.7 s of quiet); it
+                    # closes an open turn the same way utterance_end does.
                     if msg.end_of_utterance is not False:
                         self._end_of_speech()
                     return
@@ -405,6 +404,11 @@ class STTStream(RecognizeStream):
                 # since a final with text is the best endpoint signal available.
                 if msg.end_of_utterance is not False:
                     self._end_of_speech()
+
+            @conn.on(StreamingMessageType.UTTERANCE_END)
+            async def on_utterance_end(msg):
+                # Closes a turn that no final with end_of_utterance closed (see above).
+                self._end_of_speech()
 
             # Send audio from LiveKit's input channel to the SDK connection
             async for data in self._input_ch:

@@ -2,6 +2,32 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [livekit-plugins-shunyalabsai 1.1.7] - 2026-11-14
+
+LiveKit plugin only. Found by running a real LiveKit `AgentSession` with `turn_detection="stt"` against the live
+services after 1.1.6 shipped.
+
+### Fixed
+
+- **Regression in 1.1.6 with `turn_detection="stt"`: a turn could stay open until the caller spoke again.** A
+  final cut at the service's segment length cap that lands at the end of speech says `end_of_utterance: false`,
+  and the service then sends only `utterance_end`. Up to 1.1.5 LiveKit committed that turn from the transcript
+  alone; 1.1.6's `START_OF_SPEECH` reopened the turn, so LiveKit waited for an `END_OF_SPEECH` that never came,
+  and merged the turn with the caller's next one (measured live: a 4.5 s Hinglish clip, user shown as speaking
+  for 24 s). The plugin now also ends an open turn on `utterance_end`. Measured live on the same clip: 1.1.5
+  committed 0.50 s after the final, 1.1.7 0.87 s after it; turns that end on a normal final are unchanged.
+- **1.1.6's noise fix now works on the real service.** It closed the turn on an empty final, but the service
+  suppresses empty finals by default, so a dropped noise final leaves only `utterance_end`, which now closes it.
+
+### Documentation
+
+- `clause_first` helps only when the opening clause has at least 12 words (the service's
+  `TTS_REALTIME_FIRST_WORDS`) and the text is still arriving. Measured live with an 18-word opening clause at
+  ~20 words/s: first audio 2.50 s to 1.31 s (Hinglish) and 2.55 s to 1.38 s (Hindi); with a 7-word opening
+  clause, no change.
+- LiveKit's `aec_warmup_duration` (default 3 s) hides the caller's audio from the STT during the start of every
+  agent reply; with `turn_detection="stt"` and no VAD, speech in that window is lost and cannot interrupt.
+
 ## [livekit-plugins-shunyalabsai 1.1.6] - 2026-11-14
 
 LiveKit plugin only; core stays at 1.1.1, Pipecat at 1.1.9. Closes the two gaps left after 1.1.5. With
