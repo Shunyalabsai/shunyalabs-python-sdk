@@ -90,11 +90,13 @@ def on_speech(ev):
 
 | Shunyalabs Event | LiveKit SpeechEventType |
 |------------------|------------------------|
-| `PARTIAL` | `INTERIM_TRANSCRIPT` |
-| `FINAL` (with text) | `FINAL_TRANSCRIPT` + `RECOGNITION_USAGE` + `END_OF_SPEECH` |
+| First `PARTIAL` of a turn | `START_OF_SPEECH` + `INTERIM_TRANSCRIPT` |
+| Later `PARTIAL` | `INTERIM_TRANSCRIPT` |
+| `FINAL` (with text) | `START_OF_SPEECH` (if no partial opened the turn) + `FINAL_TRANSCRIPT` + `RECOGNITION_USAGE` + `END_OF_SPEECH` |
+| Empty `FINAL` while a turn is open | `END_OF_SPEECH` (the service dropped a noise final) |
 | `FINAL_REFINED` | `FINAL_TRANSCRIPT` |
 
-Events reach LiveKit in the order the service sent them.
+Events reach LiveKit in the order the service sent them. Each turn gets exactly one `START_OF_SPEECH` and one `END_OF_SPEECH`. LiveKit reads those two only with `turn_detection="stt"`; with VAD turn detection they are ignored.
 
 ### Batch STT
 
@@ -128,6 +130,8 @@ print(event.alternatives[0].text)
 | `sample_rate` | `int` | `24000` | Output audio sample rate in Hz. The gateway emits 24 kHz PCM on both the streaming and batch paths; override only if you resample the audio yourself. |
 | `output_format` | `str` | `"pcm"` | Audio format for the **batch** (`synthesize`) path (`"pcm"`, `"wav"`, `"mp3"`, `"ogg_opus"`, `"flac"`). The real-time stream is always PCM. |
 | `speed` | `float` | `1.0` | Speaking speed multiplier (0.25 to 4.0, pitch kept). Applies to streaming and batch. |
+| `quality` | `str` | `None` | `"low"`, `"medium"` or `"high"`; `None` takes the service default (medium). Applies to streaming and batch. `"low"` gives the fastest first audio but can drop a word in short clips, so avoid it for numbers, dates and codes. |
+| `clause_first` | `bool` | `None` | Streaming only. `True` starts speaking at the first clause instead of the first full sentence: earlier first audio on long replies, a possible audible join. `None` takes the service default (off). |
 
 ### Style Tags
 
@@ -157,7 +161,7 @@ tts = shunyalabs.TTS(voice="Rajesh", style="<Happy>")
 
 ### Streaming TTS
 
-Token-by-token streaming. The SDK opens a connection to the real-time TTS service and sends a JSON init message (`{voice, language, model, client}`, plus `speed` when not 1.0); once the service replies `{"type": "ready"}`, text is sent as `{"type": "text", ...}` as soon as it arrives and each segment ends with `{"type": "flush"}`. The service speaks each sentence as soon as it is complete and returns binary PCM audio and `{"type": "done"}`. The session stays open for the next turn, and an interruption sends `{"type": "cancel"}` instead of closing it.
+Token-by-token streaming. The SDK opens a connection to the real-time TTS service and sends a JSON init message (`{voice, language, model, client}`, plus `speed` when not 1.0 and `quality` / `clause_first` when set); once the service replies `{"type": "ready"}`, text is sent as `{"type": "text", ...}` as soon as it arrives and each segment ends with `{"type": "flush"}`. The service speaks each sentence as soon as it is complete and returns binary PCM audio and `{"type": "done"}`. The session stays open for the next turn, and an interruption sends `{"type": "cancel"}` instead of closing it.
 
 ```python
 from livekit.agents import AgentSession

@@ -2,6 +2,27 @@
 
 All notable changes to the Shunyalabs Python SDK and plugins are documented here.
 
+## [livekit-plugins-shunyalabsai 1.1.6] - 2026-11-14
+
+LiveKit plugin only; core stays at 1.1.1, Pipecat at 1.1.9. Closes the two gaps left after 1.1.5. With
+`quality` and `clause_first` unset and VAD turn detection, the plugin behaves as 1.1.5.
+
+### Added
+
+- **TTS `quality`** (`"low"` / `"medium"` / `"high"`), sent in the real-time session's init and in the batch
+  request when set. Same meaning as the Pipecat option.
+- **TTS `clause_first`**, sent in the real-time session's init when set. Same meaning as the Pipecat option.
+- **STT `START_OF_SPEECH`.** Sent once per turn, on the first partial with text, or on a final with text
+  when no partial came first (a short "Yes." can arrive as a final alone). LiveKit uses it only with
+  `turn_detection="stt"`, where it marks the user as speaking, records when the turn started and stops a
+  pending end-of-turn from firing while the user is still talking.
+
+### Changed
+
+- **An empty final now closes a turn that partials opened.** The service drops a short unsure final (a
+  cough, a click) and sends an empty one instead; without this, `START_OF_SPEECH` from the partials would
+  have left the user marked as speaking. With no turn open, an empty final still produces no events.
+
 ## [livekit-plugins-shunyalabsai 1.1.5] - 2026-11-13
 
 LiveKit plugin only; core stays at 1.1.1, Pipecat at 1.1.9. Brings over the Pipecat changes since 1.1.0

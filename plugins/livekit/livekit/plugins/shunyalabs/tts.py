@@ -71,6 +71,13 @@ _CANCEL_ACK_TIMEOUT_S = 1.0
 _MAX_SESSION_S = 300.0
 
 
+class _PluginTTSConfig(TTSConfig):
+    """The core's config plus ``quality``, which the batch endpoint accepts but the core does not
+    model yet. ``to_request_payload`` sends every non-None field, so it reaches the request body."""
+
+    quality: Optional[str] = None
+
+
 class _Session:
     """One ready ``/v1/realtime`` session: socket open, init sent, ``ready`` received."""
 
@@ -107,6 +114,17 @@ class TTS(tts.TTS):
             on the real-time stream it is sent in the session's init message when not
             1.0, so it holds for the life of the pooled session. The service clamps it
             to 0.25-4.0 and keeps the pitch; a service without speed support ignores it.
+        quality: ``"low"``, ``"medium"`` or ``"high"``; ``None`` (default) takes the
+            service default, medium. Applied on both paths; on the real-time stream it
+            holds for the life of the pooled session. ``"low"`` is the biggest single
+            cut to first audio, but it drops a word in a measurable share of short clips,
+            so keep it away from numbers, dates and reference codes. Any other value is
+            refused by the service.
+        clause_first: Real-time stream only. ``True`` releases the first piece of a
+            reply at a clause boundary instead of waiting for the first full sentence:
+            earlier first audio on long replies, no change on short ones, and the split
+            sentence is spoken in two pieces, which can be audible at the join.
+            ``None`` (default) takes the service default, off.
     """
 
     def __init__(
@@ -122,6 +140,8 @@ class TTS(tts.TTS):
         sample_rate: int = 24000,
         output_format: str = "pcm",
         speed: float = 1.0,
+        quality: Optional[str] = None,
+        clause_first: Optional[bool] = None,
     ) -> None:
         super().__init__(
             capabilities=TTSCapabilities(streaming=True),
@@ -146,6 +166,8 @@ class TTS(tts.TTS):
         self._language = language
         self._output_format = output_format
         self._speed = speed
+        self._quality = quality
+        self._clause_first = clause_first
         self._auth = TokenAuth(self._api_key)
         # Persistent realtime sessions, reused across turns (connect + init + ready
         # is paid once, not per segment). A session is checked out by one stream at
@@ -182,6 +204,11 @@ class TTS(tts.TTS):
             # the batch path, and every real-time stream spoke at 1.0.)
             if self._speed is not None and float(self._speed) != 1.0:
                 init["speed"] = float(self._speed)
+            # Also session-level, and sent only when set, so the service default holds otherwise.
+            if self._quality is not None:
+                init["quality"] = self._quality
+            if self._clause_first is not None:
+                init["clause_first"] = bool(self._clause_first)
             await transport.send_message(init)
             ready = await asyncio.wait_for(transport.receive_message(), timeout=timeout)
         except BaseException:
@@ -258,12 +285,13 @@ class TTS(tts.TTS):
 
     def _make_tts_config(self) -> TTSConfig:
         """Build a TTSConfig from plugin settings."""
-        return TTSConfig(
+        return _PluginTTSConfig(
             model=self._model,
             voice=self._voice,
             language=self._language,
             response_format=self._output_format,
             speed=self._speed,
+            quality=self._quality,
         )
 
     async def _resolve_urls(self) -> None:

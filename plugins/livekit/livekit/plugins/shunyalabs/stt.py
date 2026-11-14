@@ -242,7 +242,25 @@ class STTStream(RecognizeStream):
         super().__init__(stt=stt, conn_options=conn_options, sample_rate=16000)
         self._stt = stt
         self._language = language
+        # True between START_OF_SPEECH and END_OF_SPEECH. Kept on the stream, not in
+        # _run, so a reconnect in the middle of a turn neither repeats the start nor
+        # loses the end.
+        self._in_speech = False
 
+    def _start_of_speech(self) -> None:
+        """Open the turn on the first evidence of speech, once per turn.
+
+        Only LiveKit's ``turn_detection="stt"`` mode reads this event; with VAD turn
+        detection it is ignored, so those sessions behave exactly as before.
+        """
+        if not self._in_speech:
+            self._in_speech = True
+            self._event_ch.send_nowait(SpeechEvent(type=SpeechEventType.START_OF_SPEECH))
+
+    def _end_of_speech(self) -> None:
+        if self._in_speech:
+            self._in_speech = False
+            self._event_ch.send_nowait(SpeechEvent(type=SpeechEventType.END_OF_SPEECH))
 
     async def _run(self) -> None:
         await self._stt._resolve_urls()
@@ -295,6 +313,9 @@ class STTStream(RecognizeStream):
             @conn.on(StreamingMessageType.PARTIAL)
             async def on_partial(msg):
                 if msg.text:
+                    # The first partial of a turn is the earliest speech evidence the
+                    # gateway gives, so it opens the turn (as in the pipecat plugin).
+                    self._start_of_speech()
                     self._event_ch.send_nowait(
                         SpeechEvent(
                             type=SpeechEventType.INTERIM_TRANSCRIPT,
@@ -326,6 +347,10 @@ class STTStream(RecognizeStream):
             #     would generate a stream of end-of-speech events.
             #
             # Keying off a final that actually carries text is immune to both.
+            # The one exception is a turn already opened by partials whose final
+            # comes back empty: the gateway drops a short unsure final (a cough, a
+            # click) and sends an empty one in its place. That empty final closes
+            # the open turn; with no turn open, an empty final still does nothing.
 
             @conn.on(StreamingMessageType.FINAL_REFINED)
             async def on_final_refined(msg):
@@ -348,11 +373,16 @@ class STTStream(RecognizeStream):
             async def on_final(msg):
                 if not msg.text:
                     # An empty final is the gateway re-endpointing on silence.
-                    # It carries no transcript and is not a turn boundary, so it
-                    # produces no events at all -- including no usage, which would
-                    # otherwise tick once per ~800 ms of quiet.
+                    # It carries no transcript, so it produces no transcript or usage
+                    # (usage would otherwise tick once per ~800 ms of quiet). It only
+                    # closes a turn that partials opened and that produced no text.
+                    if msg.end_of_utterance is not False:
+                        self._end_of_speech()
                     return
 
+                # A short answer ("Yes.", "Five.") can arrive as a final with no
+                # partial before it, so a final with text opens the turn too.
+                self._start_of_speech()
                 self._event_ch.send_nowait(
                     SpeechEvent(
                         type=SpeechEventType.FINAL_TRANSCRIPT,
@@ -374,9 +404,7 @@ class STTStream(RecognizeStream):
                 # that does not send the field at all should still close the turn,
                 # since a final with text is the best endpoint signal available.
                 if msg.end_of_utterance is not False:
-                    self._event_ch.send_nowait(
-                        SpeechEvent(type=SpeechEventType.END_OF_SPEECH)
-                    )
+                    self._end_of_speech()
 
             # Send audio from LiveKit's input channel to the SDK connection
             async for data in self._input_ch:
